@@ -56,6 +56,30 @@ const seedTodos = [
   { id: "t1", text: "계통,시판 행사 비용 집계", done: false, date: todayStr() },
 ];
 
+// Claude 아티팩트 안에서는 window.storage(전용 저장 API)를 쓰고,
+// 실제로 배포된 웹사이트에서는 그 API가 없으므로 브라우저 localStorage로 자동 전환합니다.
+const hasArtifactStorage = typeof window !== "undefined" && !!window.storage;
+
+async function storageGet(key) {
+  if (hasArtifactStorage) {
+    try { return await window.storage.get(key, false); } catch { return null; }
+  }
+  try {
+    const v = window.localStorage.getItem(key);
+    return v !== null ? { value: v } : null;
+  } catch { return null; }
+}
+
+async function storageSet(key, value) {
+  if (hasArtifactStorage) {
+    try { return await window.storage.set(key, value, false); } catch { return null; }
+  }
+  try {
+    window.localStorage.setItem(key, value);
+    return { key, value };
+  } catch { return null; }
+}
+
 export default function CalendarTodoApp() {
   const now = new Date();
   const [viewYear, setViewYear] = useState(now.getFullYear());
@@ -84,8 +108,8 @@ export default function CalendarTodoApp() {
     (async () => {
       try {
         const [evRes, tdRes] = await Promise.all([
-          window.storage.get("calendar-events", false).catch(() => null),
-          window.storage.get("calendar-todos", false).catch(() => null),
+          storageGet("calendar-events"),
+          storageGet("calendar-todos"),
         ]);
         if (cancelled) return;
         if (evRes && evRes.value) {
@@ -104,14 +128,14 @@ export default function CalendarTodoApp() {
   // 일정이 바뀔 때마다 저장 (불러오기가 끝난 뒤에만 — 그 전에 저장하면 불러온 데이터를 덮어씁니다)
   useEffect(() => {
     if (!loaded) return;
-    window.storage.set("calendar-events", JSON.stringify(events), false)
+    storageSet("calendar-events", JSON.stringify(events))
       .then(res => setSaveError(!res))
       .catch(() => setSaveError(true));
   }, [events, loaded]);
 
   useEffect(() => {
     if (!loaded) return;
-    window.storage.set("calendar-todos", JSON.stringify(todos), false)
+    storageSet("calendar-todos", JSON.stringify(todos))
       .then(res => setSaveError(!res))
       .catch(() => setSaveError(true));
   }, [todos, loaded]);
