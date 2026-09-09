@@ -1,5 +1,14 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { ChevronLeft, ChevronRight, Plus, Clock, Trash2, X, CalendarDays, ListTodo, Users, Star, Check, Pencil, Download, Upload, Plane, Palmtree } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Clock, Trash2, X, CalendarDays, ListTodo, Users, Star, Check, Pencil, Download, Upload, Plane, Palmtree, LogOut } from "lucide-react";
+import { auth, db } from "./firebase";
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  updateProfile,
+} from "firebase/auth";
+import { doc, getDoc, setDoc, deleteDoc, collection, onSnapshot } from "firebase/firestore";
 
 const BG = "#F8F9FC";
 const SURFACE = "#FFFFFF";
@@ -62,28 +71,103 @@ const seedTodos = [
   { id: "t1", text: "계통,시판 행사 비용 집계", done: false, date: todayStr() },
 ];
 
-// Claude 아티팩트 안에서는 window.storage(전용 저장 API)를 쓰고,
-// 실제로 배포된 웹사이트에서는 그 API가 없으므로 브라우저 localStorage로 자동 전환합니다.
-const hasArtifactStorage = typeof window !== "undefined" && !!window.storage;
-
-async function storageGet(key) {
-  if (hasArtifactStorage) {
-    try { return await window.storage.get(key, false); } catch { return null; }
-  }
-  try {
-    const v = window.localStorage.getItem(key);
-    return v !== null ? { value: v } : null;
-  } catch { return null; }
+// 사용자 아이디를 Firebase 인증용 이메일 형식으로 변환합니다 (내부용, 실제 이메일 불필요).
+function toAuthEmail(username) {
+  return `${username.trim().toLowerCase()}@nhfood-calendar.app`;
 }
 
-async function storageSet(key, value) {
-  if (hasArtifactStorage) {
-    try { return await window.storage.set(key, value, false); } catch { return null; }
+function authErrorMessage(code) {
+  switch (code) {
+    case "auth/email-already-in-use": return "이미 사용 중인 아이디예요.";
+    case "auth/weak-password": return "비밀번호는 6자 이상이어야 해요.";
+    case "auth/invalid-email": return "아이디는 영문/숫자로 입력해주세요.";
+    case "auth/user-not-found":
+    case "auth/wrong-password":
+    case "auth/invalid-credential": return "아이디 또는 비밀번호가 올바르지 않아요.";
+    default: return "오류가 발생했어요. 다시 시도해주세요.";
   }
+}
+
+// 사용자별 데이터는 Firestore의 calendarData/{uid} 문서에 저장합니다.
+async function loadUserData(uid) {
   try {
-    window.localStorage.setItem(key, value);
-    return { key, value };
-  } catch { return null; }
+    const snap = await getDoc(doc(db, "calendarData", uid));
+    return snap.exists() ? snap.data() : null;
+  } catch {
+    return null;
+  }
+}
+async function saveUserData(uid, data) {
+  try {
+    await setDoc(doc(db, "calendarData", uid), data, { merge: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function AuthScreen({ mode, setMode, form, setForm, onSubmit, error, loading }) {
+  return (
+    <div className="w-full min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: BG, fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');`}</style>
+      <form onSubmit={onSubmit} className="w-full max-w-sm rounded-xl p-6" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
+        <h1 className="text-base font-semibold mb-1" style={{ color: "#111827" }}>일정 관리</h1>
+        <p className="text-xs text-gray-500 mb-5">
+          {mode === "login" ? "로그인해서 내 일정을 확인하세요" : "새 계정을 만드세요"}
+        </p>
+
+        {mode === "signup" && (
+          <>
+            <label className="text-xs font-medium text-gray-500 block mb-1">이름</label>
+            <input
+              value={form.name}
+              onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
+              className="w-full text-sm px-3 py-2 rounded-lg outline-none border border-gray-200 mb-3"
+              style={{ backgroundColor: SIDEBAR_BG }}
+            />
+          </>
+        )}
+
+        <label className="text-xs font-medium text-gray-500 block mb-1">아이디</label>
+        <input
+          value={form.username}
+          onChange={(e) => setForm(f => ({ ...f, username: e.target.value }))}
+          className="w-full text-sm px-3 py-2 rounded-lg outline-none border border-gray-200 mb-3"
+          style={{ backgroundColor: SIDEBAR_BG }}
+          autoCapitalize="none"
+          autoCorrect="off"
+        />
+
+        <label className="text-xs font-medium text-gray-500 block mb-1">비밀번호</label>
+        <input
+          type="password"
+          value={form.password}
+          onChange={(e) => setForm(f => ({ ...f, password: e.target.value }))}
+          className="w-full text-sm px-3 py-2 rounded-lg outline-none border border-gray-200 mb-4"
+          style={{ backgroundColor: SIDEBAR_BG }}
+        />
+
+        {error && <p className="text-xs mb-3" style={{ color: "#EF4444" }}>{error}</p>}
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full py-2.5 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+          style={{ backgroundColor: ACCENT }}
+        >
+          {loading ? "처리 중..." : mode === "login" ? "로그인" : "회원가입"}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setMode(mode === "login" ? "signup" : "login")}
+          className="w-full text-center text-xs text-gray-500 mt-4 hover:text-gray-700"
+        >
+          {mode === "login" ? "계정이 없으신가요? 회원가입" : "이미 계정이 있으신가요? 로그인"}
+        </button>
+      </form>
+    </div>
+  );
 }
 
 export default function CalendarTodoApp() {
@@ -98,7 +182,7 @@ export default function CalendarTodoApp() {
   const [saveError, setSaveError] = useState(false);
 
   const [formOpen, setFormOpen] = useState(false);
-  const [form, setForm] = useState({ id: null, date: todayStr(), endDate: todayStr(), continuous: false, time: "09:00", title: "", type: "meeting" });
+  const [form, setForm] = useState({ id: null, date: todayStr(), endDate: todayStr(), continuous: false, time: "09:00", title: "", type: "meeting", shared: true });
 
   const [editingTodoId, setEditingTodoId] = useState(null);
   const [editingTodoText, setEditingTodoText] = useState("");
@@ -109,43 +193,78 @@ export default function CalendarTodoApp() {
   const [previewRect, setPreviewRect] = useState(null);
   const closeTimer = useRef(null);
 
-  // 저장된 일정/할 일 불러오기 (앱을 다시 열어도 안전하게 유지)
+  // --- 로그인/인증 상태 ---
+  const [authChecked, setAuthChecked] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authMode, setAuthMode] = useState("login");
+  const [authForm, setAuthForm] = useState({ name: "", username: "", password: "" });
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [evRes, tdRes] = await Promise.all([
-          storageGet("calendar-events"),
-          storageGet("calendar-todos"),
-        ]);
-        if (cancelled) return;
-        if (evRes && evRes.value) {
-          try { setEvents(JSON.parse(evRes.value)); } catch { /* 저장된 값 손상 시 기본값 유지 */ }
-        }
-        if (tdRes && tdRes.value) {
-          try { setTodos(JSON.parse(tdRes.value)); } catch { /* 저장된 값 손상 시 기본값 유지 */ }
-        }
-      } finally {
-        if (!cancelled) setLoaded(true);
-      }
-    })();
-    return () => { cancelled = true; };
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setAuthChecked(true);
+    });
+    return unsub;
   }, []);
 
-  // 일정이 바뀔 때마다 저장 (불러오기가 끝난 뒤에만 — 그 전에 저장하면 불러온 데이터를 덮어씁니다)
+  async function handleAuthSubmit(e) {
+    e.preventDefault();
+    setAuthError("");
+    if (!authForm.username.trim() || !authForm.password) {
+      setAuthError("아이디와 비밀번호를 입력해주세요.");
+      return;
+    }
+    if (authMode === "signup" && !authForm.name.trim()) {
+      setAuthError("이름을 입력해주세요.");
+      return;
+    }
+    setAuthLoading(true);
+    try {
+      if (authMode === "signup") {
+        const cred = await createUserWithEmailAndPassword(auth, toAuthEmail(authForm.username), authForm.password);
+        await updateProfile(cred.user, { displayName: authForm.name.trim() });
+        setCurrentUser({ ...cred.user, displayName: authForm.name.trim() });
+      } else {
+        await signInWithEmailAndPassword(auth, toAuthEmail(authForm.username), authForm.password);
+      }
+    } catch (err) {
+      setAuthError(authErrorMessage(err.code));
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  // 저장된 일정/할 일 불러오기 (로그인한 사용자별로 Firestore에서 불러옵니다)
   useEffect(() => {
-    if (!loaded) return;
-    storageSet("calendar-events", JSON.stringify(events))
-      .then(res => setSaveError(!res))
-      .catch(() => setSaveError(true));
-  }, [events, loaded]);
+    if (!currentUser) { setLoaded(false); return; }
+    let cancelled = false;
+    (async () => {
+      const data = await loadUserData(currentUser.uid);
+      if (cancelled) return;
+      if (data) {
+        if (Array.isArray(data.events)) setEvents(data.events);
+        if (Array.isArray(data.todos)) setTodos(data.todos);
+      } else {
+        setEvents(seedEvents);
+        setTodos(seedTodos);
+      }
+      setLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, [currentUser]);
+
+  // 일정/할 일이 바뀔 때마다 로그인한 사용자 문서에 저장 (불러오기가 끝난 뒤에만)
+  useEffect(() => {
+    if (!loaded || !currentUser) return;
+    saveUserData(currentUser.uid, { events }).then(ok => setSaveError(!ok));
+  }, [events, loaded, currentUser]);
 
   useEffect(() => {
-    if (!loaded) return;
-    storageSet("calendar-todos", JSON.stringify(todos))
-      .then(res => setSaveError(!res))
-      .catch(() => setSaveError(true));
-  }, [todos, loaded]);
+    if (!loaded || !currentUser) return;
+    saveUserData(currentUser.uid, { todos }).then(ok => setSaveError(!ok));
+  }, [todos, loaded, currentUser]);
 
   // 완료하지 못한 채 날짜가 지난 할 일은 자동으로 오늘 날짜로 이월됩니다. (저장된 데이터를 불러온 뒤 1회 실행)
   useEffect(() => {
@@ -213,22 +332,23 @@ export default function CalendarTodoApp() {
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
     setPreviewDate(null);
     setPreviewRect(null);
-    setForm({ id: null, date: dateStr, endDate: dateStr, continuous: false, time: "09:00", title: "", type: "meeting" });
+    setForm({ id: null, date: dateStr, endDate: dateStr, continuous: false, time: "09:00", title: "", type: "meeting", shared: true });
     setFormOpen(true);
   }
   function openEventForEdit(ev) {
+    if (ev.ownerUid && currentUser && ev.ownerUid !== currentUser.uid) return; // 다른 팀원의 일정은 수정 불가
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
     setPreviewDate(null);
     setPreviewRect(null);
     const hasRange = !!ev.endDate && ev.endDate !== ev.date;
-    setForm({ id: ev.id, date: ev.date, endDate: ev.endDate || ev.date, continuous: hasRange, time: ev.time, title: ev.title, type: ev.type });
+    setForm({ id: ev.id, date: ev.date, endDate: ev.endDate || ev.date, continuous: hasRange, time: ev.time, title: ev.title, type: ev.type, shared: ev.shared !== false });
     setFormOpen(true);
   }
   function submitEvent(e) {
     e.preventDefault();
     if (!form.title.trim()) return;
     const finalEndDate = form.continuous && form.endDate && form.endDate >= form.date ? form.endDate : form.date;
-    const payload = { id: form.id, date: form.date, endDate: finalEndDate, time: form.time, title: form.title, type: form.type };
+    const payload = { id: form.id, date: form.date, endDate: finalEndDate, time: form.time, title: form.title, type: form.type, shared: form.shared };
     if (form.id) {
       setEvents(prev => prev.map(ev => ev.id === form.id ? payload : ev).sort((a, b) =>
         a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date)
@@ -291,14 +411,60 @@ export default function CalendarTodoApp() {
     setPreviewRect(null);
   }
 
+  // --- 팀 공유 일정 ---
+  // 내 캘린더(calendarData/{uid})는 내 전체 일정(공유+비공유)의 원본입니다.
+  // shared !== false 인 일정만 sharedEvents 컬렉션에 미러링해서 다른 팀원이 볼 수 있게 합니다.
+  const [teamSharedEvents, setTeamSharedEvents] = useState([]);
+  const mirroredIdsRef = useRef(new Set());
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsub = onSnapshot(collection(db, "sharedEvents"), (snap) => {
+      setTeamSharedEvents(snap.docs.map(d => d.data()));
+    });
+    return unsub;
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!loaded || !currentUser) return;
+    const myName = currentUser.displayName || currentUser.email;
+    const currentSharedIds = new Set(events.filter(ev => ev.shared !== false).map(ev => ev.id));
+    const prevIds = mirroredIdsRef.current;
+
+    for (const id of prevIds) {
+      if (!currentSharedIds.has(id)) {
+        deleteDoc(doc(db, "sharedEvents", `${currentUser.uid}_${id}`)).catch(() => {});
+      }
+    }
+    for (const ev of events) {
+      if (currentSharedIds.has(ev.id)) {
+        setDoc(doc(db, "sharedEvents", `${currentUser.uid}_${ev.id}`), {
+          ...ev,
+          ownerUid: currentUser.uid,
+          ownerName: myName,
+        }).catch(() => {});
+      }
+    }
+    mirroredIdsRef.current = currentSharedIds;
+  }, [events, loaded, currentUser]);
+
+  // 캘린더 표시용: 내 일정 전부 + 다른 팀원이 공유한 일정 (내 것 중복 제외)
+  const combinedEvents = useMemo(() => {
+    if (!currentUser) return events;
+    const myName = currentUser.displayName || currentUser.email;
+    const own = events.map(ev => ({ ...ev, ownerUid: currentUser.uid, ownerName: myName }));
+    const others = teamSharedEvents.filter(ev => ev.ownerUid !== currentUser.uid);
+    return [...own, ...others];
+  }, [events, teamSharedEvents, currentUser]);
+
   const todayEvents = useMemo(() => {
     const t = todayStr();
-    return events.filter(ev => ev.date === t).sort((a, b) => a.time.localeCompare(b.time));
-  }, [events]);
+    return combinedEvents.filter(ev => ev.date === t).sort((a, b) => a.time.localeCompare(b.time));
+  }, [combinedEvents]);
 
   const upcomingGrouped = useMemo(() => {
     const t = todayStr();
-    const future = events.filter(ev => ev.date > t).sort((a, b) =>
+    const future = combinedEvents.filter(ev => ev.date > t).sort((a, b) =>
       a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date)
     );
     const groups = [];
@@ -313,9 +479,9 @@ export default function CalendarTodoApp() {
       groups[groups.length - 1].events.push(ev);
     }
     return groups;
-  }, [events]);
+  }, [combinedEvents]);
 
-  const multiDayEvents = useMemo(() => events.filter(ev => ev.endDate && ev.endDate !== ev.date), [events]);
+  const multiDayEvents = useMemo(() => combinedEvents.filter(ev => ev.endDate && ev.endDate !== ev.date), [combinedEvents]);
 
   // 연속 일정을 주 단위로 잘라서, 캘린더 그리드 위에 이어지는 막대로 그릴 위치를 계산합니다.
   const barSegments = useMemo(() => {
@@ -343,20 +509,26 @@ export default function CalendarTodoApp() {
 
   const eventsByDate = useMemo(() => {
     const map = {};
-    for (const ev of events) {
+    for (const ev of combinedEvents) {
       if (ev.endDate && ev.endDate !== ev.date) continue; // 연속 일정은 별도 막대로 표시
       if (!map[ev.date]) map[ev.date] = [];
       map[ev.date].push(ev);
     }
     for (const k in map) map[k].sort((a, b) => a.time.localeCompare(b.time));
     return map;
-  }, [events]);
+  }, [combinedEvents]);
 
   // 특정 날짜에 표시할 전체 일정(단일일 + 그 날짜를 포함하는 연속 일정)
   function eventsOnDate(dateStr) {
     const single = eventsByDate[dateStr] || [];
     const multi = multiDayEvents.filter(ev => dateStr >= ev.date && dateStr <= ev.endDate);
     return [...multi, ...single];
+  }
+
+  // 다른 팀원이 공유한 일정이면 이름을 붙여 구분합니다.
+  function ownerLabel(ev) {
+    if (!currentUser || !ev.ownerUid || ev.ownerUid === currentUser.uid) return "";
+    return ev.ownerName ? ` · ${ev.ownerName}` : "";
   }
 
   const todosByDate = useMemo(() => {
@@ -395,6 +567,28 @@ export default function CalendarTodoApp() {
   const previewEvents = previewDate ? eventsOnDate(previewDate) : [];
   const previewTodos = previewDate ? (todosByDate[previewDate] || []) : [];
 
+  if (!authChecked) {
+    return (
+      <div className="w-full min-h-screen flex items-center justify-center" style={{ backgroundColor: BG, fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}>
+        <p className="text-sm text-gray-400">확인하는 중...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <AuthScreen
+        mode={authMode}
+        setMode={setAuthMode}
+        form={authForm}
+        setForm={setAuthForm}
+        onSubmit={handleAuthSubmit}
+        error={authError}
+        loading={authLoading}
+      />
+    );
+  }
+
   if (!loaded) {
     return (
       <div className="w-full min-h-screen flex items-center justify-center" style={{ backgroundColor: BG, fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}>
@@ -412,12 +606,21 @@ export default function CalendarTodoApp() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 sm:mb-6">
           <div>
             <h1 className="text-base font-semibold" style={{ color: "#111827" }}>일정 관리</h1>
-            <p className="text-xs mt-1 text-gray-500">회의, 중요 일정, 할 일을 한 곳에서 관리하세요</p>
+            <p className="text-xs mt-1 text-gray-500">
+              {currentUser.displayName || currentUser.email} 님 · 회의, 중요 일정, 할 일을 한 곳에서 관리하세요
+            </p>
             {saveError && (
               <p className="text-xs mt-1" style={{ color: "#EF4444" }}>저장에 실패했습니다. 방금 한 변경사항이 유지되지 않을 수 있어요.</p>
             )}
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => signOut(auth)}
+              title="로그아웃"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
+            >
+              <LogOut size={14} /> 로그아웃
+            </button>
             <input
               ref={fileInputRef}
               type="file"
@@ -528,7 +731,7 @@ export default function CalendarTodoApp() {
                           }}
                         >
                           <span className="opacity-70">{ev.time}</span>
-                          <span className="truncate">{ev.title}</span>
+                          <span className="truncate">{ev.title}{ownerLabel(ev)}</span>
                         </button>
                       ))}
                       {shownTodos.map(td => (
@@ -573,7 +776,7 @@ export default function CalendarTodoApp() {
                   }}
                 >
                   <span className="opacity-70">{seg.ev.time}</span>
-                  <span className="truncate">{seg.ev.title}</span>
+                  <span className="truncate">{seg.ev.title}{ownerLabel(seg.ev)}</span>
                 </button>
               ))}
             </div>
@@ -614,18 +817,22 @@ export default function CalendarTodoApp() {
                       <div className="flex items-center gap-2 min-w-0">
                         {React.createElement(styleFor(ev.type).icon, { size: 14, style: { color: styleFor(ev.type).dot, flexShrink: 0 } })}
                         <div className="min-w-0">
-                          <p className="text-xs font-medium truncate" style={{ color: "#111827" }}>{ev.title}</p>
+                          <p className="text-xs font-medium truncate" style={{ color: "#111827" }}>{ev.title}{ownerLabel(ev)}</p>
                           <p className="text-xs text-gray-400">
                             {ev.endDate && ev.endDate !== ev.date ? `${ev.date} ~ ${ev.endDate} · ${ev.time}` : ev.time}
                           </p>
                         </div>
                       </div>
-                      <button onClick={() => openEventForEdit(ev)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-gray-600 transition-opacity flex-shrink-0">
-                        <Pencil size={13} />
-                      </button>
-                      <button onClick={() => deleteEvent(ev.id)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity flex-shrink-0">
-                        <Trash2 size={13} />
-                      </button>
+                      {(!ev.ownerUid || ev.ownerUid === currentUser.uid) && (
+                        <>
+                          <button onClick={() => openEventForEdit(ev)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-gray-600 transition-opacity flex-shrink-0">
+                            <Pencil size={13} />
+                          </button>
+                          <button onClick={() => deleteEvent(ev.id)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity flex-shrink-0">
+                            <Trash2 size={13} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -770,18 +977,22 @@ export default function CalendarTodoApp() {
                             <div className="flex items-center gap-2 min-w-0">
                               {React.createElement(styleFor(ev.type).icon, { size: 14, style: { color: styleFor(ev.type).dot, flexShrink: 0 } })}
                               <div className="min-w-0">
-                                <p className="text-xs font-medium truncate" style={{ color: "#111827" }}>{ev.title}</p>
+                                <p className="text-xs font-medium truncate" style={{ color: "#111827" }}>{ev.title}{ownerLabel(ev)}</p>
                                 <p className="text-xs text-gray-400">
                                   {ev.endDate && ev.endDate !== ev.date ? `${ev.date} ~ ${ev.endDate} · ${ev.time}` : `${ev.date} · ${ev.time}`}
                                 </p>
                               </div>
                             </div>
-                            <button onClick={() => openEventForEdit(ev)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-gray-600 transition-opacity flex-shrink-0">
-                              <Pencil size={13} />
-                            </button>
-                            <button onClick={() => deleteEvent(ev.id)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity flex-shrink-0">
-                              <Trash2 size={13} />
-                            </button>
+                            {(!ev.ownerUid || ev.ownerUid === currentUser.uid) && (
+                              <>
+                                <button onClick={() => openEventForEdit(ev)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-gray-600 transition-opacity flex-shrink-0">
+                                  <Pencil size={13} />
+                                </button>
+                                <button onClick={() => deleteEvent(ev.id)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity flex-shrink-0">
+                                  <Trash2 size={13} />
+                                </button>
+                              </>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -830,7 +1041,7 @@ export default function CalendarTodoApp() {
                   >
                     {React.createElement(styleFor(ev.type).icon, { size: 12, style: { color: styleFor(ev.type).dot, marginTop: 2, flexShrink: 0 } })}
                     <div className="min-w-0">
-                      <p className="text-xs font-medium" style={{ color: "#111827" }}>{ev.title}</p>
+                      <p className="text-xs font-medium" style={{ color: "#111827" }}>{ev.title}{ownerLabel(ev)}</p>
                       <p className="text-xs text-gray-400">
                         {ev.endDate && ev.endDate !== ev.date ? `${ev.date} ~ ${ev.endDate} · ${ev.time}` : ev.time}
                       </p>
@@ -964,7 +1175,7 @@ export default function CalendarTodoApp() {
             )}
 
             <label className="text-xs font-medium text-gray-500 block mb-1.5">유형</label>
-            <div className="grid grid-cols-2 gap-2 mb-5">
+            <div className="grid grid-cols-2 gap-2 mb-4">
               {Object.entries(TYPE_STYLES).map(([key, s]) => (
                 <button
                   key={key}
@@ -981,6 +1192,19 @@ export default function CalendarTodoApp() {
                 </button>
               ))}
             </div>
+
+            <label className="flex items-center gap-2 mb-5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.shared}
+                onChange={(e) => setForm(f => ({ ...f, shared: e.target.checked }))}
+                className="w-4 h-4 rounded"
+                style={{ accentColor: ACCENT }}
+              />
+              <span className="text-xs font-medium text-gray-600">
+                팀에 공유 (체크 해제하면 나에게만 보여요)
+              </span>
+            </label>
 
             <button
               type="button"
