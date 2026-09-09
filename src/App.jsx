@@ -624,13 +624,13 @@ export default function CalendarTodoApp() {
               <p className="text-xs mt-1" style={{ color: "#EF4444" }}>저장에 실패했습니다. 방금 한 변경사항이 유지되지 않을 수 있어요.</p>
             )}
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap justify-end sm:flex-nowrap">
             <button
               onClick={() => signOut(auth)}
               title="로그아웃"
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 whitespace-nowrap"
             >
-              <LogOut size={14} /> 로그아웃
+              <LogOut size={14} /> <span className="hidden sm:inline">로그아웃</span>
             </button>
             <input
               ref={fileInputRef}
@@ -642,20 +642,20 @@ export default function CalendarTodoApp() {
             <button
               onClick={triggerImport}
               title="백업 파일에서 불러오기"
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 whitespace-nowrap"
             >
-              <Upload size={14} /> 가져오기
+              <Upload size={14} /> <span className="hidden sm:inline">가져오기</span>
             </button>
             <button
               onClick={exportData}
               title="현재 일정/할 일을 파일로 저장"
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 whitespace-nowrap"
             >
-              <Download size={14} /> 내보내기
+              <Download size={14} /> <span className="hidden sm:inline">내보내기</span>
             </button>
             <button
               onClick={() => openFormForDate(todayStr())}
-              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90 flex-1 sm:flex-none"
+              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90 flex-1 sm:flex-none whitespace-nowrap"
               style={{ backgroundColor: ACCENT }}
             >
               <Plus size={16} /> 일정 추가
@@ -663,9 +663,9 @@ export default function CalendarTodoApp() {
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 sm:gap-6">
           {/* Calendar */}
-          <div className="col-span-3 rounded-xl p-3 sm:p-5" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
+          <div className="md:col-span-3 rounded-xl p-3 sm:p-5" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-full" style={{ backgroundColor: ACCENT_SOFT }}>
                 <CalendarDays size={16} style={{ color: ACCENT }} />
@@ -828,7 +828,7 @@ export default function CalendarTodoApp() {
           </div>
 
           {/* Right column: Today's events, Today's todos, Upcoming */}
-          <div className="col-span-1 flex flex-col gap-4 sm:gap-6">
+          <div className="md:col-span-1 flex flex-col gap-4 sm:gap-6">
             <div className="rounded-xl p-4 sm:p-5" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
               <div className="flex items-center gap-2 mb-3">
                 <CalendarDays size={16} style={{ color: ACCENT }} />
