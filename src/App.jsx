@@ -656,9 +656,9 @@ export default function CalendarTodoApp() {
           {/* Calendar */}
           <div className="col-span-3 rounded-xl p-3 sm:p-5" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
             <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <CalendarDays size={18} style={{ color: ACCENT }} />
-                <span className="text-sm font-semibold" style={{ color: "#111827" }}>{monthLabel}</span>
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full" style={{ backgroundColor: ACCENT_SOFT }}>
+                <CalendarDays size={16} style={{ color: ACCENT }} />
+                <span className="text-sm font-semibold" style={{ color: ACCENT }}>{monthLabel}</span>
               </div>
               <div className="flex items-center gap-1">
                 <button onClick={() => changeMonth(-1)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
@@ -711,10 +711,11 @@ export default function CalendarTodoApp() {
                     style={{ backgroundColor: isToday ? SURFACE_ALT : "transparent", gridColumn: col + 1, gridRow: row + 1 }}
                   >
                     <span
-                      className="text-xs font-medium w-5 h-5 flex items-center justify-center rounded-full"
+                      className="text-xs font-semibold w-6 h-6 flex items-center justify-center rounded-full"
                       style={{
                         color: isToday ? "#FFFFFF" : weekday === 0 ? "#EF4444" : weekday === 6 ? ACCENT : "#111827",
                         backgroundColor: isToday ? ACCENT : "transparent",
+                        boxShadow: isToday ? "0 0 0 3px rgba(79,115,245,0.18)" : "none",
                       }}
                     >
                       {day}
@@ -968,7 +969,10 @@ export default function CalendarTodoApp() {
                 <div className="flex flex-col gap-3">
                   {upcomingGrouped.map((group, gi) => (
                     <div key={group.key}>
-                      <div className="text-xs font-semibold text-gray-400 mb-1.5">
+                      <div
+                        className="inline-block text-xs font-semibold px-2 py-0.5 rounded-full mb-1.5"
+                        style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}
+                      >
                         {gi > 0 && group.year !== upcomingGrouped[0].year ? `${group.year}년 ${group.month}월` : `${group.month}월`}
                       </div>
                       <div className="flex flex-col gap-2">
