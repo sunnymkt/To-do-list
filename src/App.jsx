@@ -366,7 +366,7 @@ export default function CalendarTodoApp() {
   }
   function addTodo() {
     if (!newTodo.trim()) return;
-    setTodos(prev => [...prev, { id: "t" + Date.now(), text: newTodo.trim(), done: false, date: newTodoDate }]);
+    setTodos(prev => [...prev, { id: "t" + Date.now(), text: newTodo.trim(), done: false, date: newTodoDate, createdAt: todayStr() }]);
     setNewTodo("");
   }
   function toggleTodo(id) {
@@ -543,6 +543,17 @@ export default function CalendarTodoApp() {
   const todayTodos = useMemo(() => todos.filter(t => t.date === todayStr()), [todos]);
   const doneCount = todayTodos.filter(t => t.done).length;
 
+  // 완료된 채로 지나간 이전 날짜 할 일은 사라지지 않고 연하게 계속 남아있습니다.
+  const pastCompletedTodos = useMemo(() => {
+    const t = todayStr();
+    return todos.filter(td => td.done && td.date < t).sort((a, b) => b.date.localeCompare(a.date));
+  }, [todos]);
+
+  function shortDateLabel(dateStr) {
+    const [, m, d] = dateStr.split("-");
+    return `${parseInt(m, 10)}/${parseInt(d, 10)}`;
+  }
+
   // 미리보기 카드 위치 계산: 셀 아래쪽에 붙이되, 화면 오른쪽/아래쪽을 넘치면 반대쪽으로
   const previewStyle = useMemo(() => {
     if (!previewRect) return null;
@@ -686,7 +697,7 @@ export default function CalendarTodoApp() {
               {grid.map((day, idx) => {
                 const col = idx % 7;
                 const row = Math.floor(idx / 7);
-                if (day === null) return <div key={idx} className="min-h-24 sm:min-h-28 lg:min-h-36 rounded-lg" style={{ gridColumn: col + 1, gridRow: row + 1 }} />;
+                if (day === null) return <div key={idx} className="min-h-24 sm:min-h-28 lg:min-h-36 rounded-lg" style={{ gridColumn: col + 1, gridRow: row + 1, backgroundColor: col === 6 ? "#F7F9FD" : "transparent" }} />;
                 const dateStr = fmtDate(viewYear, viewMonth, day);
                 const isToday = dateStr === todayStr();
                 const dayEvents = eventsByDate[dateStr] || [];
@@ -707,8 +718,8 @@ export default function CalendarTodoApp() {
                     onKeyDown={(e) => { if (e.key === "Enter") openFormForDate(dateStr); }}
                     onMouseEnter={(e) => handleCellEnter(e, dateStr, hasContent)}
                     onMouseLeave={handleCellLeave}
-                    className="min-h-24 sm:min-h-28 lg:min-h-36 rounded-lg p-1 sm:p-1.5 text-left flex flex-col gap-1 border border-transparent hover:border-gray-200 transition-colors cursor-pointer"
-                    style={{ backgroundColor: isToday ? SURFACE_ALT : "transparent", gridColumn: col + 1, gridRow: row + 1 }}
+                    className="min-h-24 sm:min-h-28 lg:min-h-36 rounded-lg p-1 sm:p-1.5 text-left flex flex-col gap-1 border border-transparent hover:border-gray-200 hover:-translate-y-0.5 hover:shadow-sm transition-all cursor-pointer"
+                    style={{ backgroundColor: isToday ? SURFACE_ALT : weekday === 6 ? "#F7F9FD" : "transparent", gridColumn: col + 1, gridRow: row + 1 }}
                   >
                     <span
                       className="text-xs font-semibold w-6 h-6 flex items-center justify-center rounded-full"
@@ -780,6 +791,20 @@ export default function CalendarTodoApp() {
                   <span className="truncate">{seg.ev.title}{ownerLabel(seg.ev)}</span>
                 </button>
               ))}
+              {Array.from({ length: Math.max(0, grid.length / 7 - 1) }).map((_, row) => (
+                <div
+                  key={`week-divider-${row}`}
+                  style={{
+                    gridColumnStart: 1,
+                    gridColumnEnd: 8,
+                    gridRowStart: row + 1,
+                    alignSelf: "end",
+                    height: "1px",
+                    backgroundColor: "#EEF0F4",
+                    pointerEvents: "none",
+                  }}
+                />
+              ))}
             </div>
 
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-4 pt-4" style={{ borderTop: "1px solid #F1F2F6" }}>
@@ -814,7 +839,7 @@ export default function CalendarTodoApp() {
               ) : (
                 <div className="flex flex-col gap-2">
                   {todayEvents.map(ev => (
-                    <div key={ev.id} className="flex items-center justify-between gap-2 group">
+                    <div key={ev.id} className="flex items-center justify-between gap-2 group rounded-lg p-2" style={{ border: "1px solid #EEF0F4" }}>
                       <div className="flex items-center gap-2 min-w-0">
                         {React.createElement(styleFor(ev.type).icon, { size: 14, style: { color: styleFor(ev.type).dot, flexShrink: 0 } })}
                         <div className="min-w-0">
@@ -904,7 +929,7 @@ export default function CalendarTodoApp() {
               ) : (
                 <div className="flex flex-col gap-1.5">
                   {todayTodos.map(t => (
-                    <div key={t.id} className="flex items-center gap-2 group px-1 py-1 rounded-lg hover:bg-gray-50">
+                    <div key={t.id} className="flex items-center gap-2 group px-2 py-1.5 rounded-lg hover:bg-gray-50" style={{ border: "1px solid #EEF0F4" }}>
                       {editingTodoId === t.id ? (
                         <>
                           <input
@@ -943,6 +968,9 @@ export default function CalendarTodoApp() {
                           </button>
                           <span className={`text-xs flex-1 ${t.done ? "line-through text-gray-400" : "text-gray-700"}`}>
                             {t.text}
+                            {t.createdAt && (
+                              <span className="text-gray-300 ml-1.5">{shortDateLabel(t.createdAt)}</span>
+                            )}
                           </span>
                           <button onClick={() => startEditTodo(t)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-gray-600 transition-opacity flex-shrink-0">
                             <Pencil size={12} />
@@ -952,6 +980,28 @@ export default function CalendarTodoApp() {
                           </button>
                         </>
                       )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {pastCompletedTodos.length > 0 && (
+                <div className="flex flex-col gap-1.5 mt-1.5">
+                  {pastCompletedTodos.map(t => (
+                    <div key={t.id} className="flex items-center gap-2 group px-2 py-1.5 rounded-lg" style={{ border: "1px solid #F3F4F6" }}>
+                      <button
+                        onClick={() => toggleTodo(t.id)}
+                        className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border"
+                        style={{ borderColor: "#E5E7EB", backgroundColor: "#E5E7EB" }}
+                      >
+                        <span className="text-white text-xs leading-none">✓</span>
+                      </button>
+                      <span className="text-xs flex-1 line-through text-gray-300">
+                        {t.text}
+                        <span className="text-gray-300 ml-1.5">{shortDateLabel(t.date)} 완료</span>
+                      </span>
+                      <button onClick={() => deleteTodo(t.id)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity flex-shrink-0">
+                        <Trash2 size={12} />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -977,7 +1027,7 @@ export default function CalendarTodoApp() {
                       </div>
                       <div className="flex flex-col gap-2">
                         {group.events.map(ev => (
-                          <div key={ev.id} className="flex items-center justify-between gap-2 group">
+                          <div key={ev.id} className="flex items-center justify-between gap-2 group rounded-lg p-2" style={{ border: "1px solid #EEF0F4" }}>
                             <div className="flex items-center gap-2 min-w-0">
                               {React.createElement(styleFor(ev.type).icon, { size: 14, style: { color: styleFor(ev.type).dot, flexShrink: 0 } })}
                               <div className="min-w-0">
