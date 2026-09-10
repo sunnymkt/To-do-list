@@ -554,6 +554,12 @@ export default function CalendarTodoApp() {
     return `${parseInt(m, 10)}/${parseInt(d, 10)}`;
   }
 
+  function dateWithWeekday(dateStr) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const wd = WEEKDAYS[new Date(y, m - 1, d).getDay()];
+    return { md: `${m}/${d}`, wd };
+  }
+
   // 미리보기 카드 위치 계산: 셀 아래쪽에 붙이되, 화면 오른쪽/아래쪽을 넘치면 반대쪽으로
   const previewStyle = useMemo(() => {
     if (!previewRect) return null;
@@ -1028,12 +1034,20 @@ export default function CalendarTodoApp() {
                       <div className="flex flex-col gap-2">
                         {group.events.map(ev => (
                           <div key={ev.id} className="flex items-center justify-between gap-2 group rounded-lg p-2" style={{ border: "1px solid #EEF0F4" }}>
-                            <div className="flex items-center gap-2 min-w-0">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="flex flex-col items-center justify-center flex-shrink-0" style={{ width: "2.75rem" }}>
+                                <span className="text-sm font-bold leading-tight" style={{ color: ACCENT }}>
+                                  {dateWithWeekday(ev.date).md}
+                                </span>
+                                <span className="text-xs text-gray-400 leading-tight">
+                                  ({dateWithWeekday(ev.date).wd})
+                                </span>
+                              </div>
                               {React.createElement(styleFor(ev.type).icon, { size: 14, style: { color: styleFor(ev.type).dot, flexShrink: 0 } })}
                               <div className="min-w-0">
                                 <p className="text-xs font-medium truncate" style={{ color: "#111827" }}>{ev.title}{ownerLabel(ev)}</p>
                                 <p className="text-xs text-gray-400">
-                                  {ev.endDate && ev.endDate !== ev.date ? `${ev.date} ~ ${ev.endDate} · ${ev.time}` : `${ev.date} · ${ev.time}`}
+                                  {ev.endDate && ev.endDate !== ev.date ? `~ ${shortDateLabel(ev.endDate)} · ${ev.time}` : ev.time}
                                 </p>
                               </div>
                             </div>
