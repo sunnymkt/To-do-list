@@ -1122,7 +1122,11 @@ export default function CalendarTodoApp() {
                   <div style={{ borderTop: "1px solid #F1F2F6", margin: "2px 0" }} />
                 )}
                 {previewTodos.map(td => (
-                  <div key={td.id} className="flex items-start gap-2">
+                  <button
+                    key={td.id}
+                    onClick={(e) => { e.stopPropagation(); toggleTodo(td.id); }}
+                    className="flex items-start gap-2 w-full text-left hover:bg-gray-50 rounded-md p-0.5 -m-0.5"
+                  >
                     <span
                       className="w-3 h-3 rounded-sm border flex items-center justify-center flex-shrink-0"
                       style={{ marginTop: 2, borderColor: "#9CA3AF", backgroundColor: td.done ? "#9CA3AF" : "transparent" }}
@@ -1130,7 +1134,7 @@ export default function CalendarTodoApp() {
                       {td.done && <Check size={8} color="#FFFFFF" strokeWidth={3} />}
                     </span>
                     <p className={`text-xs ${td.done ? "line-through text-gray-400" : "text-gray-700"}`}>{td.text}</p>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
