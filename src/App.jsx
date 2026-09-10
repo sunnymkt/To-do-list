@@ -618,7 +618,7 @@ export default function CalendarTodoApp() {
     <div className="w-full min-h-screen" style={{ backgroundColor: BG, fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');`}</style>
 
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-5 sm:py-8">
+      <div className="mx-auto px-3 sm:px-6 py-5 sm:py-8" style={{ maxWidth: "1680px" }}>
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 sm:mb-6">
           <div>
