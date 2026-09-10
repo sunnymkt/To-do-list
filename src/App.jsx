@@ -543,12 +543,6 @@ export default function CalendarTodoApp() {
   const todayTodos = useMemo(() => todos.filter(t => t.date === todayStr()), [todos]);
   const doneCount = todayTodos.filter(t => t.done).length;
 
-  // 완료된 채로 지나간 이전 날짜 할 일은 사라지지 않고 연하게 계속 남아있습니다.
-  const pastCompletedTodos = useMemo(() => {
-    const t = todayStr();
-    return todos.filter(td => td.done && td.date < t).sort((a, b) => b.date.localeCompare(a.date));
-  }, [todos]);
-
   function shortDateLabel(dateStr) {
     const [, m, d] = dateStr.split("-");
     return `${parseInt(m, 10)}/${parseInt(d, 10)}`;
@@ -987,28 +981,6 @@ export default function CalendarTodoApp() {
                           </button>
                         </>
                       )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {pastCompletedTodos.length > 0 && (
-                <div className="flex flex-col gap-1.5 mt-1.5">
-                  {pastCompletedTodos.map(t => (
-                    <div key={t.id} className="flex items-center gap-2 group px-2 py-1.5 rounded-lg" style={{ border: "1px solid #F3F4F6" }}>
-                      <button
-                        onClick={() => toggleTodo(t.id)}
-                        className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border"
-                        style={{ borderColor: "#E5E7EB", backgroundColor: "#E5E7EB" }}
-                      >
-                        <span className="text-white text-xs leading-none">✓</span>
-                      </button>
-                      <span className="text-xs flex-1 line-through text-gray-300">
-                        {t.text}
-                        <span className="text-gray-300 ml-1.5">{shortDateLabel(t.date)} 완료</span>
-                      </span>
-                      <button onClick={() => deleteTodo(t.id)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity flex-shrink-0">
-                        <Trash2 size={12} />
-                      </button>
                     </div>
                   ))}
                 </div>
