@@ -35,6 +35,23 @@ function styleFor(type) {
   return TYPE_STYLES[type] || TYPE_STYLES.meeting;
 }
 
+// 팀원 이름 -> 한 음절 배지 매핑
+const NAME_BADGES = {
+  "서현": "서",
+  "최유희": "최",
+  "양준영": "양",
+  "서미애": "미",
+  "김시라": "시",
+  "김현택": "택",
+  "권오성": "5",
+  "김병철": "병",
+  "장명은": "명",
+};
+function badgeForName(name) {
+  if (!name) return "?";
+  return NAME_BADGES[name] || name[0];
+}
+
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
 function pad(n) {
@@ -403,6 +420,13 @@ export default function CalendarTodoApp() {
       setPreviewRect(null);
     }, 120);
   }
+  // 날짜를 클릭하면 미리보기를 엽니다 (내용이 없어도 "일정 추가" 버튼을 쓸 수 있게 항상 엽니다).
+  function handleCellClick(e, dateStr) {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setPreviewRect(rect);
+    setPreviewDate(dateStr);
+  }
   function handlePreviewEnter() {
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
   }
@@ -525,10 +549,16 @@ export default function CalendarTodoApp() {
     return [...multi, ...single];
   }
 
-  // 다른 팀원이 공유한 일정이면 이름을 붙여 구분합니다.
-  function ownerLabel(ev) {
-    if (!currentUser || !ev.ownerUid || ev.ownerUid === currentUser.uid) return "";
-    return ev.ownerName ? ` · ${ev.ownerName}` : "";
+  // 일정 담당자를 한 음절 배지로 표시합니다.
+  function renderBadge(ev, size = 13) {
+    return (
+      <span
+        className="rounded-full flex items-center justify-center flex-shrink-0"
+        style={{ width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.6)}px`, fontWeight: 700, backgroundColor: styleFor(ev.type).dot, color: "#fff" }}
+      >
+        {badgeForName(ev.ownerName)}
+      </span>
+    );
   }
 
   const todosByDate = useMemo(() => {
@@ -714,8 +744,8 @@ export default function CalendarTodoApp() {
                     key={idx}
                     role="button"
                     tabIndex={0}
-                    onClick={() => openFormForDate(dateStr)}
-                    onKeyDown={(e) => { if (e.key === "Enter") openFormForDate(dateStr); }}
+                    onClick={(e) => handleCellClick(e, dateStr)}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleCellClick(e, dateStr); }}
                     onMouseEnter={(e) => handleCellEnter(e, dateStr, hasContent)}
                     onMouseLeave={handleCellLeave}
                     className="min-h-24 sm:min-h-28 lg:min-h-36 rounded-lg p-1 sm:p-1.5 text-left flex flex-col gap-1 border border-transparent hover:border-gray-200 hover:-translate-y-0.5 hover:shadow-sm transition-all cursor-pointer"
@@ -742,8 +772,9 @@ export default function CalendarTodoApp() {
                             color: styleFor(ev.type).text,
                           }}
                         >
+                          {renderBadge(ev)}
                           <span className="opacity-70">{ev.time}</span>
-                          <span className="truncate">{ev.title}{ownerLabel(ev)}</span>
+                          <span className="truncate">{ev.title}</span>
                         </button>
                       ))}
                       {shownTodos.map(td => (
@@ -787,8 +818,9 @@ export default function CalendarTodoApp() {
                     color: styleFor(seg.ev.type).text,
                   }}
                 >
+                  {renderBadge(seg.ev)}
                   <span className="opacity-70">{seg.ev.time}</span>
-                  <span className="truncate">{seg.ev.title}{ownerLabel(seg.ev)}</span>
+                  <span className="truncate">{seg.ev.title}</span>
                 </button>
               ))}
               {Array.from({ length: Math.max(0, grid.length / 7 - 1) }).map((_, row) => (
@@ -842,9 +874,10 @@ export default function CalendarTodoApp() {
                   {todayEvents.map(ev => (
                     <div key={ev.id} className="flex items-center justify-between gap-2 group rounded-lg p-2" style={{ border: "1px solid #EEF0F4" }}>
                       <div className="flex items-center gap-2 min-w-0">
+                        {renderBadge(ev, 14)}
                         {React.createElement(styleFor(ev.type).icon, { size: 14, style: { color: styleFor(ev.type).dot, flexShrink: 0 } })}
                         <div className="min-w-0">
-                          <p className="text-xs font-medium truncate" style={{ color: "#111827" }}>{ev.title}{ownerLabel(ev)}</p>
+                          <p className="text-xs font-medium truncate" style={{ color: "#111827" }}>{ev.title}</p>
                           <p className="text-xs text-gray-400">
                             {ev.endDate && ev.endDate !== ev.date ? `${ev.date} ~ ${ev.endDate} · ${ev.time}` : ev.time}
                           </p>
@@ -1017,9 +1050,10 @@ export default function CalendarTodoApp() {
                                   ({dateWithWeekday(ev.date).wd})
                                 </span>
                               </div>
+                              {renderBadge(ev, 14)}
                               {React.createElement(styleFor(ev.type).icon, { size: 14, style: { color: styleFor(ev.type).dot, flexShrink: 0 } })}
                               <div className="min-w-0">
-                                <p className="text-xs font-medium truncate" style={{ color: "#111827" }}>{ev.title}{ownerLabel(ev)}</p>
+                                <p className="text-xs font-medium truncate" style={{ color: "#111827" }}>{ev.title}</p>
                                 <p className="text-xs text-gray-400">
                                   {ev.endDate && ev.endDate !== ev.date ? `~ ${shortDateLabel(ev.endDate)} · ${ev.time}` : ev.time}
                                 </p>
@@ -1062,13 +1096,22 @@ export default function CalendarTodoApp() {
               boxShadow: "0 12px 28px rgba(17,24,39,0.14)",
             }}
           >
-            <div className="flex items-center justify-between mb-2.5">
+            <div className="flex items-center justify-between mb-2.5 gap-2">
               <span className="text-xs font-semibold" style={{ color: "#111827" }}>
                 {previewDate.slice(5).replace("-", "월 ")}일
               </span>
-              {previewDate === todayStr() && (
-                <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}>오늘</span>
-              )}
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {previewDate === todayStr() && (
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}>오늘</span>
+                )}
+                <button
+                  onClick={() => openFormForDate(previewDate)}
+                  className="flex items-center gap-0.5 text-xs font-medium px-2 py-1 rounded-lg text-white"
+                  style={{ backgroundColor: ACCENT }}
+                >
+                  <Plus size={11} /> 일정 추가
+                </button>
+              </div>
             </div>
 
             {previewEvents.length === 0 && previewTodos.length === 0 ? (
@@ -1081,9 +1124,10 @@ export default function CalendarTodoApp() {
                     onClick={() => openEventForEdit(ev)}
                     className="flex items-start gap-2 w-full text-left hover:bg-gray-50 rounded-md p-0.5 -m-0.5"
                   >
+                    {renderBadge(ev, 14)}
                     {React.createElement(styleFor(ev.type).icon, { size: 12, style: { color: styleFor(ev.type).dot, marginTop: 2, flexShrink: 0 } })}
                     <div className="min-w-0">
-                      <p className="text-xs font-medium" style={{ color: "#111827" }}>{ev.title}{ownerLabel(ev)}</p>
+                      <p className="text-xs font-medium" style={{ color: "#111827" }}>{ev.title}</p>
                       <p className="text-xs text-gray-400">
                         {ev.endDate && ev.endDate !== ev.date ? `${ev.date} ~ ${ev.endDate} · ${ev.time}` : ev.time}
                       </p>
