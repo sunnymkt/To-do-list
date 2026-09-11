@@ -128,7 +128,7 @@ function AuthScreen({ mode, setMode, form, setForm, onSubmit, error, loading }) 
     <div className="w-full min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: BG, fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');`}</style>
       <form onSubmit={onSubmit} className="w-full max-w-sm rounded-xl p-6" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
-        <h1 className="text-base font-semibold mb-1" style={{ color: "#111827" }}>일정 관리</h1>
+        <h1 className="text-base font-semibold mb-1" style={{ color: "#111827" }}>마케팅부 일정관리</h1>
         <p className="text-xs text-gray-500 mb-5">
           {mode === "login" ? "로그인해서 내 일정을 확인하세요" : "새 계정을 만드세요"}
         </p>
@@ -640,13 +640,18 @@ export default function CalendarTodoApp() {
 
   return (
     <div className="w-full min-h-screen" style={{ backgroundColor: BG, fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');`}</style>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        @media (max-width: 639px) {
+          .day-grid { grid-template-columns: 1fr 2fr 2fr 2fr 2fr 2fr 1fr !important; }
+        }
+      `}</style>
 
       <div className="mx-auto px-3 sm:px-6 py-5 sm:py-8" style={{ maxWidth: "1680px" }}>
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 sm:mb-6">
           <div>
-            <h1 className="text-base font-semibold" style={{ color: "#111827" }}>일정 관리</h1>
+            <h1 className="text-base font-semibold" style={{ color: "#111827" }}>마케팅부 일정관리</h1>
             <p className="text-xs mt-1 text-gray-500">
               {currentUser.displayName || currentUser.email} 님 · 회의, 중요 일정, 할 일을 한 곳에서 관리하세요
             </p>
@@ -714,7 +719,7 @@ export default function CalendarTodoApp() {
               </div>
             </div>
 
-            <div className="grid grid-cols-7 gap-1 mb-1">
+            <div className="day-grid grid grid-cols-7 gap-1 mb-1">
               {WEEKDAYS.map((w, i) => (
                 <div key={w} className="text-center text-xs font-medium py-1"
                   style={{ color: i === 0 ? "#EF4444" : i === 6 ? ACCENT : "#6B7280" }}>
@@ -723,7 +728,7 @@ export default function CalendarTodoApp() {
               ))}
             </div>
 
-            <div className="grid grid-cols-7 gap-1" style={{ position: "relative" }}>
+            <div className="day-grid grid grid-cols-7 gap-1" style={{ position: "relative" }}>
               {grid.map((day, idx) => {
                 const col = idx % 7;
                 const row = Math.floor(idx / 7);
