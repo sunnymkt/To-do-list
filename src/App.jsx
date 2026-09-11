@@ -210,6 +210,14 @@ export default function CalendarTodoApp() {
   const [previewRect, setPreviewRect] = useState(null);
   const closeTimer = useRef(null);
 
+  // 모바일 폭 감지 (주말 칸 너비 조정, 칸 안에 보이는 항목 수 조정용)
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 640);
+  useEffect(() => {
+    function onResize() { setIsMobile(window.innerWidth < 640); }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   // --- 로그인/인증 상태 ---
   const [authChecked, setAuthChecked] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
@@ -640,12 +648,7 @@ export default function CalendarTodoApp() {
 
   return (
     <div className="w-full min-h-screen" style={{ backgroundColor: BG, fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        @media (max-width: 639px) {
-          .day-grid { grid-template-columns: 1fr 2fr 2fr 2fr 2fr 2fr 1fr !important; }
-        }
-      `}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');`}</style>
 
       <div className="mx-auto px-3 sm:px-6 py-5 sm:py-8" style={{ maxWidth: "1680px" }}>
         {/* Header */}
@@ -719,7 +722,7 @@ export default function CalendarTodoApp() {
               </div>
             </div>
 
-            <div className="day-grid grid grid-cols-7 gap-1 mb-1">
+            <div className="grid grid-cols-7 gap-1 mb-1" style={{ gridTemplateColumns: isMobile ? "1fr 2fr 2fr 2fr 2fr 2fr 1fr" : undefined }}>
               {WEEKDAYS.map((w, i) => (
                 <div key={w} className="text-center text-xs font-medium py-1"
                   style={{ color: i === 0 ? "#EF4444" : i === 6 ? ACCENT : "#6B7280" }}>
@@ -728,7 +731,7 @@ export default function CalendarTodoApp() {
               ))}
             </div>
 
-            <div className="day-grid grid grid-cols-7 gap-1" style={{ position: "relative" }}>
+            <div className="grid grid-cols-7 gap-1" style={{ position: "relative", gridTemplateColumns: isMobile ? "1fr 2fr 2fr 2fr 2fr 2fr 1fr" : undefined }}>
               {grid.map((day, idx) => {
                 const col = idx % 7;
                 const row = Math.floor(idx / 7);
@@ -739,8 +742,9 @@ export default function CalendarTodoApp() {
                 const dayTodos = todosByDate[dateStr] || [];
                 const coveredByMultiDay = multiDayEvents.some(ev => dateStr >= ev.date && dateStr <= ev.endDate);
                 const hasContent = eventsOnDate(dateStr).length > 0 || dayTodos.length > 0;
-                const shownEvents = dayEvents.slice(0, 3);
-                const todoSlots = Math.max(0, 4 - shownEvents.length);
+                const maxShown = isMobile ? 2 : 4;
+                const shownEvents = dayEvents.slice(0, isMobile ? 1 : 3);
+                const todoSlots = Math.max(0, maxShown - shownEvents.length);
                 const shownTodos = dayTodos.slice(0, todoSlots);
                 const extra = (dayEvents.length - shownEvents.length) + (dayTodos.length - shownTodos.length);
                 const weekday = idx % 7;
