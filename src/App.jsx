@@ -80,12 +80,8 @@ function buildGrid(year, month) {
   return cells;
 }
 
-const seedEvents = [
-  { id: "e1", date: todayStr(), time: "10:00", title: "유통영업팀 주간 회의", type: "meeting" },
-];
-const seedTodos = [
-  { id: "t1", text: "계통,시판 행사 비용 집계", done: false, date: todayStr() },
-];
+const seedEvents = [];
+const seedTodos = [];
 
 // 사용자 아이디를 Firebase 인증용 이메일 형식으로 변환합니다 (내부용, 실제 이메일 불필요).
 function toAuthEmail(username) {
@@ -482,7 +478,6 @@ export default function CalendarTodoApp() {
   // 내 캘린더(calendarData/{uid})는 내 전체 일정(공유+비공유)의 원본입니다.
   // shared !== false 인 일정만 sharedEvents 컬렉션에 미러링해서 다른 팀원이 볼 수 있게 합니다.
   const [teamSharedEvents, setTeamSharedEvents] = useState([]);
-  const mirroredIdsRef = useRef(new Set());
 
   useEffect(() => {
     if (!currentUser) return;
@@ -496,9 +491,13 @@ export default function CalendarTodoApp() {
     if (!loaded || !currentUser) return;
     const myName = currentUser.displayName || currentUser.email;
     const currentSharedIds = new Set(events.filter(ev => ev.shared !== false).map(ev => ev.id));
-    const prevIds = mirroredIdsRef.current;
+    // 실제 원격(Firestore)에 이미 올라가 있는 내 공유 일정 id들과 비교합니다.
+    // (세션마다 새로 시작하는 로컬 변수 대신 실시간 구독 데이터를 기준으로 삼아 '유령 데이터'를 방지합니다.)
+    const remoteMirroredIds = new Set(
+      teamSharedEvents.filter(ev => ev.ownerUid === currentUser.uid).map(ev => ev.id)
+    );
 
-    for (const id of prevIds) {
+    for (const id of remoteMirroredIds) {
       if (!currentSharedIds.has(id)) {
         deleteDoc(doc(db, "sharedEvents", `${currentUser.uid}_${id}`)).catch(() => {});
       }
@@ -512,8 +511,7 @@ export default function CalendarTodoApp() {
         }).catch(() => {});
       }
     }
-    mirroredIdsRef.current = currentSharedIds;
-  }, [events, loaded, currentUser]);
+  }, [events, loaded, currentUser, teamSharedEvents]);
 
   // 캘린더 표시용: 내 일정 전부 + 다른 팀원이 공유한 일정 (내 것 중복 제외)
   const combinedEvents = useMemo(() => {
@@ -611,7 +609,7 @@ export default function CalendarTodoApp() {
           }
         }
         if (segStartCol !== -1) {
-          segments.push({ key: `${ev.id}-${row}`, ev, row, segStartCol, segEndCol });
+          segments.push({ key: `${ev.ownerUid}_${ev.id}-${row}`, ev, row, segStartCol, segEndCol });
         }
       }
     }
@@ -878,7 +876,7 @@ export default function CalendarTodoApp() {
                   >
                     {searchResults.map(ev => (
                       <button
-                        key={ev.id}
+                        key={`${ev.ownerUid}_${ev.id}`}
                         onClick={() => { openEventForEdit(ev); setSearchQuery(""); }}
                         className="flex items-center gap-2 w-full text-left px-3 py-2 hover:bg-gray-50"
                       >
@@ -945,7 +943,7 @@ export default function CalendarTodoApp() {
                     <div className="flex flex-col gap-0.5 min-w-0" style={{ marginTop: coveredByMultiDay ? "20px" : undefined }}>
                       {shownEvents.map(ev => (
                         <button
-                          key={ev.id}
+                          key={`${ev.ownerUid}_${ev.id}`}
                           onClick={(e) => { e.stopPropagation(); openEventForEdit(ev); }}
                           className="text-xs px-1.5 py-0.5 rounded truncate flex items-center gap-1 w-full min-w-0 text-left"
                           style={{
@@ -1042,7 +1040,7 @@ export default function CalendarTodoApp() {
                         <div className="flex flex-col gap-1">
                           {dEvents.map(ev => (
                             <button
-                              key={ev.id}
+                              key={`${ev.ownerUid}_${ev.id}`}
                               onClick={() => openEventForEdit(ev)}
                               className="flex items-center gap-2 text-left px-2 py-1 rounded-md hover:bg-gray-50"
                             >
@@ -1108,7 +1106,7 @@ export default function CalendarTodoApp() {
               ) : (
                 <div className="flex flex-col gap-2">
                   {todayEvents.map(ev => (
-                    <div key={ev.id} className="flex items-center justify-between gap-2 group rounded-lg p-2" style={{ border: "1px solid #EEF0F4" }}>
+                    <div key={`${ev.ownerUid}_${ev.id}`} className="flex items-center justify-between gap-2 group rounded-lg p-2" style={{ border: "1px solid #EEF0F4" }}>
                       <div className="flex items-center gap-2 min-w-0">
                         {renderBadge(ev, 14)}
                         {React.createElement(styleFor(ev.type).icon, { size: 14, style: { color: styleFor(ev.type).dot, flexShrink: 0 } })}
@@ -1284,7 +1282,7 @@ export default function CalendarTodoApp() {
                       </div>
                       <div className="flex flex-col gap-2">
                         {group.events.map(ev => (
-                          <div key={ev.id} className="flex items-center justify-between gap-2 group rounded-lg p-2" style={{ border: "1px solid #EEF0F4" }}>
+                          <div key={`${ev.ownerUid}_${ev.id}`} className="flex items-center justify-between gap-2 group rounded-lg p-2" style={{ border: "1px solid #EEF0F4" }}>
                             <div className="flex items-center gap-2.5 min-w-0">
                               <div className="flex flex-col items-center justify-center flex-shrink-0" style={{ width: "2.75rem" }}>
                                 <span className="text-sm font-bold leading-tight" style={{ color: ACCENT }}>
@@ -1364,7 +1362,7 @@ export default function CalendarTodoApp() {
               <div className="flex flex-col gap-1.5">
                 {previewEvents.map(ev => (
                   <button
-                    key={ev.id}
+                    key={`${ev.ownerUid}_${ev.id}`}
                     onClick={() => openEventForEdit(ev)}
                     className="flex items-start gap-2 w-full text-left hover:bg-gray-50 rounded-md p-0.5 -m-0.5"
                   >
