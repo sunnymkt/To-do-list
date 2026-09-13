@@ -647,7 +647,7 @@ export default function CalendarTodoApp() {
   }
 
   return (
-    <div className="w-full min-h-screen" style={{ backgroundColor: BG, fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}>
+    <div className="w-full min-h-screen overflow-x-hidden" style={{ backgroundColor: BG, fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');`}</style>
 
       <div className="mx-auto px-3 sm:px-6 py-5 sm:py-8" style={{ maxWidth: "1680px" }}>
@@ -703,7 +703,7 @@ export default function CalendarTodoApp() {
 
         <div className="grid grid-cols-1 md:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6">
           {/* Calendar */}
-          <div className="md:col-span-3 rounded-xl p-3 sm:p-5" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
+          <div className="md:col-span-3 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-full" style={{ backgroundColor: ACCENT_SOFT }}>
                 <CalendarDays size={16} style={{ color: ACCENT }} />
@@ -724,7 +724,7 @@ export default function CalendarTodoApp() {
 
             <div className="grid grid-cols-7 gap-1 mb-1" style={{ gridTemplateColumns: isMobile ? "1fr 2fr 2fr 2fr 2fr 2fr 1fr" : undefined }}>
               {WEEKDAYS.map((w, i) => (
-                <div key={w} className="text-center text-xs font-medium py-1"
+                <div key={w} className="text-center text-xs font-medium py-1 min-w-0"
                   style={{ color: i === 0 ? "#EF4444" : i === 6 ? ACCENT : "#6B7280" }}>
                   {w}
                 </div>
@@ -735,7 +735,7 @@ export default function CalendarTodoApp() {
               {grid.map((day, idx) => {
                 const col = idx % 7;
                 const row = Math.floor(idx / 7);
-                if (day === null) return <div key={idx} className="min-h-24 sm:min-h-28 lg:min-h-36 rounded-lg" style={{ gridColumn: col + 1, gridRow: row + 1, backgroundColor: col === 6 ? "#F7F9FD" : "transparent" }} />;
+                if (day === null) return <div key={idx} className="min-h-24 sm:min-h-28 lg:min-h-36 rounded-lg min-w-0" style={{ gridColumn: col + 1, gridRow: row + 1, backgroundColor: col === 6 ? "#F7F9FD" : "transparent" }} />;
                 const dateStr = fmtDate(viewYear, viewMonth, day);
                 const isToday = dateStr === todayStr();
                 const dayEvents = eventsByDate[dateStr] || [];
@@ -757,7 +757,7 @@ export default function CalendarTodoApp() {
                     onKeyDown={(e) => { if (e.key === "Enter") handleCellClick(e, dateStr); }}
                     onMouseEnter={(e) => handleCellEnter(e, dateStr, hasContent)}
                     onMouseLeave={handleCellLeave}
-                    className="min-h-24 sm:min-h-28 lg:min-h-36 rounded-lg p-1 sm:p-1.5 text-left flex flex-col gap-1 border border-transparent hover:border-gray-200 hover:-translate-y-0.5 hover:shadow-sm transition-all cursor-pointer"
+                    className="min-h-24 sm:min-h-28 lg:min-h-36 rounded-lg p-1 sm:p-1.5 text-left flex flex-col gap-1 border border-transparent hover:border-gray-200 hover:-translate-y-0.5 hover:shadow-sm transition-all cursor-pointer min-w-0"
                     style={{ backgroundColor: isToday ? SURFACE_ALT : weekday === 6 ? "#F7F9FD" : "transparent", gridColumn: col + 1, gridRow: row + 1 }}
                   >
                     <span
@@ -770,12 +770,12 @@ export default function CalendarTodoApp() {
                     >
                       {day}
                     </span>
-                    <div className="flex flex-col gap-0.5" style={{ marginTop: coveredByMultiDay ? "20px" : undefined }}>
+                    <div className="flex flex-col gap-0.5 min-w-0" style={{ marginTop: coveredByMultiDay ? "20px" : undefined }}>
                       {shownEvents.map(ev => (
                         <button
                           key={ev.id}
                           onClick={(e) => { e.stopPropagation(); openEventForEdit(ev); }}
-                          className="text-xs px-1.5 py-0.5 rounded truncate flex items-center gap-1 w-full text-left"
+                          className="text-xs px-1.5 py-0.5 rounded truncate flex items-center gap-1 w-full min-w-0 text-left"
                           style={{
                             backgroundColor: styleFor(ev.type).soft,
                             color: styleFor(ev.type).text,
@@ -790,7 +790,7 @@ export default function CalendarTodoApp() {
                         <button
                           key={td.id}
                           onClick={(e) => { e.stopPropagation(); toggleTodo(td.id); }}
-                          className="text-xs px-1.5 py-0.5 rounded truncate flex items-center gap-1 w-full text-left"
+                          className="text-xs px-1.5 py-0.5 rounded truncate flex items-center gap-1 w-full min-w-0 text-left"
                           style={{ backgroundColor: TODO_SOFT, color: td.done ? "#9CA3AF" : TODO_TEXT }}
                         >
                           <span
