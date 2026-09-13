@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { ChevronLeft, ChevronRight, Plus, Clock, Trash2, X, CalendarDays, ListTodo, Users, Star, Check, Pencil, Download, Upload, Plane, Palmtree, LogOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Clock, Trash2, X, CalendarDays, ListTodo, Users, Star, Check, Pencil, Download, Upload, Plane, Palmtree, LogOut, Search, MoreHorizontal } from "lucide-react";
 import { auth, db } from "./firebase";
 import {
   onAuthStateChanged,
@@ -34,6 +34,50 @@ function styleFor(type) {
   return TYPE_STYLES[type] || TYPE_STYLES.meeting;
 }
 
+// --- 백업 파일 가져오기 검증 ---
+function isValidDateStr(s) {
+  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s).getTime());
+}
+function isValidTimeStr(s) {
+  return typeof s === "string" && /^\d{2}:\d{2}$/.test(s);
+}
+function sanitizeImportedEvents(arr) {
+  if (!Array.isArray(arr)) return { valid: [], skipped: 0 };
+  let skipped = 0;
+  const valid = [];
+  for (const raw of arr) {
+    if (!raw || typeof raw !== "object") { skipped++; continue; }
+    const title = typeof raw.title === "string" ? raw.title.trim() : "";
+    const date = isValidDateStr(raw.date) ? raw.date : null;
+    if (!title || !date) { skipped++; continue; }
+    const time = isValidTimeStr(raw.time) ? raw.time : "09:00";
+    const type = TYPE_STYLES[raw.type] ? raw.type : "meeting";
+    const endDate = isValidDateStr(raw.endDate) && raw.endDate >= date ? raw.endDate : date;
+    const shared = raw.shared !== false;
+    const id = typeof raw.id === "string" && raw.id ? raw.id : ("e" + Date.now() + Math.random().toString(36).slice(2, 6));
+    valid.push({ id, date, endDate, time, title, type, shared });
+  }
+  return { valid, skipped };
+}
+function sanitizeImportedTodos(arr) {
+  if (!Array.isArray(arr)) return { valid: [], skipped: 0 };
+  let skipped = 0;
+  const valid = [];
+  for (const raw of arr) {
+    if (!raw || typeof raw !== "object") { skipped++; continue; }
+    const text = typeof raw.text === "string" ? raw.text.trim() : "";
+    const date = isValidDateStr(raw.date) ? raw.date : null;
+    if (!text || !date) { skipped++; continue; }
+    const done = raw.done === true;
+    const id = typeof raw.id === "string" && raw.id ? raw.id : ("t" + Date.now() + Math.random().toString(36).slice(2, 6));
+    const todo = { id, text, date, done };
+    if (isValidDateStr(raw.createdAt)) todo.createdAt = raw.createdAt;
+    if (isValidDateStr(raw.originalDueDate)) todo.originalDueDate = raw.originalDueDate;
+    valid.push(todo);
+  }
+  return { valid, skipped };
+}
+
 // 팀원 이름 -> 한 음절 배지 매핑
 const NAME_BADGES = {
   "서현": "서",
@@ -49,6 +93,31 @@ const NAME_BADGES = {
 function badgeForName(name) {
   if (!name) return "?";
   return NAME_BADGES[name] || name[0];
+}
+
+// 담당자별 고정 색상 (일정 유형 색과 분리 — 배지/점 색상은 항상 '사람' 기준)
+const PERSON_COLORS = {
+  "서현": "#4F73F5",
+  "최유희": "#8B5CF6",
+  "양준영": "#10B981",
+  "서미애": "#F59E0B",
+  "김시라": "#EC4899",
+  "김현택": "#06B6D4",
+  "권오성": "#6B7280",
+  "김병철": "#EF4444",
+  "장명은": "#14B8A6",
+};
+const PERSON_COLOR_FALLBACK = "#6B7280";
+function personColor(name) {
+  if (!name) return PERSON_COLOR_FALLBACK;
+  return PERSON_COLORS[name] || PERSON_COLOR_FALLBACK;
+}
+function hexToRgba(hex, alpha) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
@@ -199,7 +268,9 @@ export default function CalendarTodoApp() {
   const [newTodo, setNewTodo] = useState("");
   const [newTodoDate, setNewTodoDate] = useState(todayStr());
   const [loaded, setLoaded] = useState(false);
-  const [saveError, setSaveError] = useState(false);
+  const [eventSaveError, setEventSaveError] = useState(false);
+  const [todoSaveError, setTodoSaveError] = useState(false);
+  const [importPreview, setImportPreview] = useState(null); // { events, todos, eventsSkipped, todosSkipped }
 
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState({ id: null, date: todayStr(), endDate: todayStr(), continuous: false, time: "09:00", title: "", type: "meeting", shared: true });
@@ -287,14 +358,25 @@ export default function CalendarTodoApp() {
   }, [currentUser]);
 
   // 일정/할 일이 바뀔 때마다 로그인한 사용자 문서에 저장 (불러오기가 끝난 뒤에만)
+  // 짧은 시간에 여러 번 바뀌어도 마지막 변경 후 0.6초 뒤에 한 번만 저장합니다 (저장 순서 뒤바뀜 방지).
+  const eventsSaveTimer = useRef(null);
   useEffect(() => {
     if (!loaded || !currentUser) return;
-    saveUserData(currentUser.uid, { events }).then(ok => setSaveError(!ok));
+    if (eventsSaveTimer.current) clearTimeout(eventsSaveTimer.current);
+    eventsSaveTimer.current = setTimeout(() => {
+      saveUserData(currentUser.uid, { events }).then(ok => setEventSaveError(!ok));
+    }, 600);
+    return () => { if (eventsSaveTimer.current) clearTimeout(eventsSaveTimer.current); };
   }, [events, loaded, currentUser]);
 
+  const todosSaveTimer = useRef(null);
   useEffect(() => {
     if (!loaded || !currentUser) return;
-    saveUserData(currentUser.uid, { todos }).then(ok => setSaveError(!ok));
+    if (todosSaveTimer.current) clearTimeout(todosSaveTimer.current);
+    todosSaveTimer.current = setTimeout(() => {
+      saveUserData(currentUser.uid, { todos }).then(ok => setTodoSaveError(!ok));
+    }, 600);
+    return () => { if (todosSaveTimer.current) clearTimeout(todosSaveTimer.current); };
   }, [todos, loaded, currentUser]);
 
   // 완료하지 못한 채 날짜가 지난 할 일은 자동으로 오늘 날짜로 이월됩니다. (저장된 데이터를 불러온 뒤 1회 실행)
@@ -330,6 +412,34 @@ export default function CalendarTodoApp() {
   }
 
   const fileInputRef = useRef(null);
+  const searchInputRef = useRef(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+  const calendarSectionRef = useRef(null);
+  const todoSectionRef = useRef(null);
+  useEffect(() => {
+    function onClickOutside(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+  useEffect(() => {
+    function onKeyDown(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+  function greetingText() {
+    const h = new Date().getHours();
+    if (h < 12) return "좋은 아침이에요";
+    if (h < 18) return "좋은 오후예요";
+    return "좋은 저녁이에요";
+  }
 
   // 백업 파일(JSON)로 내보내기 — 저장 공간과 별개로 언제든 안전하게 보관할 수 있습니다.
   function exportData() {
@@ -345,7 +455,7 @@ export default function CalendarTodoApp() {
     URL.revokeObjectURL(url);
   }
 
-  // 백업 파일에서 불러오기
+  // 백업 파일에서 불러오기 — 바로 적용하지 않고 검증 후 미리보기를 먼저 보여줍니다.
   function triggerImport() {
     if (fileInputRef.current) fileInputRef.current.click();
   }
@@ -356,14 +466,24 @@ export default function CalendarTodoApp() {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        if (Array.isArray(parsed.events)) setEvents(parsed.events);
-        if (Array.isArray(parsed.todos)) setTodos(parsed.todos);
+        const evRes = sanitizeImportedEvents(parsed.events);
+        const tdRes = sanitizeImportedTodos(parsed.todos);
+        setImportPreview({ events: evRes.valid, todos: tdRes.valid, eventsSkipped: evRes.skipped, todosSkipped: tdRes.skipped });
       } catch {
         alert("파일을 읽을 수 없습니다. 올바른 백업 파일인지 확인해주세요.");
       }
     };
     reader.readAsText(file);
     e.target.value = "";
+  }
+  function applyImport() {
+    if (!importPreview) return;
+    setEvents(importPreview.events);
+    setTodos(importPreview.todos);
+    setImportPreview(null);
+  }
+  function cancelImport() {
+    setImportPreview(null);
   }
 
   const grid = useMemo(() => buildGrid(viewYear, viewMonth), [viewYear, viewMonth]);
@@ -634,12 +754,12 @@ export default function CalendarTodoApp() {
     return [...multi, ...single];
   }
 
-  // 일정 담당자를 한 음절 배지로 표시합니다.
+  // 일정 담당자를 한 음절 배지로 표시합니다. (배지 색은 '사람' 고정색 — 일정 유형과는 별개)
   function renderBadge(ev, size = 13) {
     return (
       <span
         className="rounded-full flex items-center justify-center flex-shrink-0"
-        style={{ width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.6)}px`, fontWeight: 700, backgroundColor: styleFor(ev.type).dot, color: "#fff" }}
+        style={{ width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.6)}px`, fontWeight: 700, backgroundColor: personColor(ev.ownerName), color: "#fff" }}
       >
         {badgeForName(ev.ownerName)}
       </span>
@@ -746,24 +866,70 @@ export default function CalendarTodoApp() {
 
       <div className="mx-auto px-3 sm:px-6 py-5 sm:py-8" style={{ maxWidth: "1680px" }}>
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 sm:mb-6">
-          <div>
-            <h1 className="text-base font-semibold" style={{ color: "#111827" }}>마케팅부 일정관리</h1>
-            <p className="text-xs mt-1 text-gray-500">
-              {currentUser.displayName || currentUser.email} 님 · 회의, 중요 일정, 할 일을 한 곳에서 관리하세요
-            </p>
-            {saveError && (
-              <p className="text-xs mt-1" style={{ color: "#EF4444" }}>저장에 실패했습니다. 방금 한 변경사항이 유지되지 않을 수 있어요.</p>
-            )}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-5 sm:mb-6">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: ACCENT_SOFT }}>
+                <CalendarDays size={18} style={{ color: ACCENT }} />
+              </div>
+              <h1 className="text-sm font-semibold whitespace-nowrap" style={{ color: "#111827" }}>마케팅부 일정관리</h1>
+            </div>
+            <div className="pl-3 ml-1 border-l" style={{ borderColor: "#E5E7EB" }}>
+              <p className="text-sm font-semibold" style={{ color: "#111827" }}>
+                {greetingText()}, {currentUser.displayName || currentUser.email}님 👋
+              </p>
+              <p className="text-xs text-gray-400">
+                오늘 일정 {todayEvents.length}개 · 남은 할 일 {todayTodos.filter(t => !t.done).length}개
+              </p>
+              {eventSaveError && (
+                <p className="text-xs mt-0.5" style={{ color: "#EF4444" }}>일정 저장에 실패했습니다.</p>
+              )}
+              {todoSaveError && (
+                <p className="text-xs mt-0.5" style={{ color: "#EF4444" }}>할 일 저장에 실패했습니다.</p>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap justify-end sm:flex-nowrap">
+
+          <div className="flex items-center gap-2 w-full lg:w-auto flex-wrap justify-end">
+            <div className="relative flex-1 lg:flex-none lg:w-64">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="일정, 할 일, 담당자를 검색하세요..."
+                className="w-full text-xs pl-8 pr-12 py-2 rounded-xl outline-none border border-gray-200 focus:border-gray-300"
+                style={{ backgroundColor: SIDEBAR_BG }}
+              />
+              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-300 hidden sm:inline">Ctrl K</span>
+              {searchResults.length > 0 && (
+                <div
+                  className="absolute left-0 right-0 mt-1 rounded-lg overflow-y-auto"
+                  style={{ top: "100%", maxHeight: "320px", backgroundColor: SURFACE, border: "1px solid #D6DAE3", boxShadow: "0 8px 20px rgba(17,24,39,0.12)", zIndex: 50 }}
+                >
+                  {searchResults.map(ev => (
+                    <button
+                      key={`${ev.ownerUid}_${ev.id}`}
+                      onClick={() => { openEventForEdit(ev); setSearchQuery(""); }}
+                      className="flex items-center gap-2 w-full text-left px-3 py-2 hover:bg-gray-50"
+                    >
+                      {renderBadge(ev, 14)}
+                      <span className="text-xs text-gray-400 flex-shrink-0">{shortDateLabel(ev.date)}</span>
+                      <span className="text-xs truncate" style={{ color: "#111827" }}>{ev.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <button
-              onClick={() => signOut(auth)}
-              title="로그아웃"
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 whitespace-nowrap"
+              onClick={() => openFormForDate(todayStr())}
+              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90 whitespace-nowrap"
+              style={{ backgroundColor: ACCENT }}
             >
-              <LogOut size={14} /> <span className="hidden sm:inline">로그아웃</span>
+              <Plus size={16} /> 일정 추가
             </button>
+
             <input
               ref={fileInputRef}
               type="file"
@@ -771,31 +937,114 @@ export default function CalendarTodoApp() {
               onChange={handleImportFile}
               className="hidden"
             />
-            <button
-              onClick={triggerImport}
-              title="백업 파일에서 불러오기"
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 whitespace-nowrap"
-            >
-              <Upload size={14} /> <span className="hidden sm:inline">가져오기</span>
-            </button>
-            <button
-              onClick={exportData}
-              title="현재 일정/할 일을 파일로 저장"
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 whitespace-nowrap"
-            >
-              <Download size={14} /> <span className="hidden sm:inline">내보내기</span>
-            </button>
-            <button
-              onClick={() => openFormForDate(todayStr())}
-              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90 flex-1 sm:flex-none whitespace-nowrap"
-              style={{ backgroundColor: ACCENT }}
-            >
-              <Plus size={16} /> 일정 추가
-            </button>
+
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => setMenuOpen(o => !o)}
+                className="p-2 rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50"
+              >
+                <MoreHorizontal size={16} />
+              </button>
+              {menuOpen && (
+                <div
+                  className="absolute right-0 mt-1 rounded-lg overflow-hidden"
+                  style={{ top: "100%", width: "170px", backgroundColor: SURFACE, border: "1px solid #D6DAE3", boxShadow: "0 8px 20px rgba(17,24,39,0.12)", zIndex: 50 }}
+                >
+                  <button
+                    onClick={() => { exportData(); setMenuOpen(false); }}
+                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
+                  >
+                    <Download size={14} /> 백업 내보내기
+                  </button>
+                  <button
+                    onClick={() => { triggerImport(); setMenuOpen(false); }}
+                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
+                  >
+                    <Upload size={14} /> 백업 가져오기
+                  </button>
+                  <button
+                    onClick={() => signOut(auth)}
+                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
+                    style={{ borderTop: "1px solid #F1F2F6" }}
+                  >
+                    <LogOut size={14} /> 로그아웃
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6">
+        <div className="flex flex-col lg:flex-row gap-4 sm:gap-6">
+          {/* 왼쪽 사이드바 (데스크톱 전용) */}
+          <div className="hidden lg:flex flex-col w-56 flex-shrink-0 gap-4">
+            <div className="rounded-xl p-2" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
+              <button
+                onClick={() => calendarSectionRef.current?.scrollIntoView({ behavior: "smooth" })}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium"
+                style={{ backgroundColor: ACCENT_SOFT, color: ACCENT }}
+              >
+                <CalendarDays size={16} /> 캘린더
+              </button>
+              <button
+                onClick={() => todoSectionRef.current?.scrollIntoView({ behavior: "smooth" })}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50"
+              >
+                <ListTodo size={16} /> 할 일
+              </button>
+              <button
+                onClick={() => { setAssigneeFilter("all"); calendarSectionRef.current?.scrollIntoView({ behavior: "smooth" }); }}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50"
+              >
+                <Users size={16} /> 팀 일정
+              </button>
+            </div>
+
+            <div className="rounded-xl p-3" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
+              <p className="text-xs font-semibold text-gray-400 px-1 mb-2">담당자 필터</p>
+              <div className="flex flex-col gap-0.5">
+                <button
+                  onClick={() => setAssigneeFilter("all")}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-left"
+                  style={{ backgroundColor: assigneeFilter === "all" ? ACCENT : "transparent", color: assigneeFilter === "all" ? "#fff" : "#374151" }}
+                >
+                  전체
+                </button>
+                <button
+                  onClick={() => setAssigneeFilter("me")}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-left"
+                  style={{ backgroundColor: assigneeFilter === "me" ? ACCENT : "transparent", color: assigneeFilter === "me" ? "#fff" : "#374151" }}
+                >
+                  나
+                </button>
+                {Object.keys(NAME_BADGES).map(name => (
+                  <button
+                    key={name}
+                    onClick={() => setAssigneeFilter(name)}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-left"
+                    style={{ backgroundColor: assigneeFilter === name ? ACCENT_SOFT : "transparent", color: assigneeFilter === name ? ACCENT : "#374151" }}
+                  >
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: personColor(name) }} />
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl p-3" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
+              <p className="text-xs font-semibold text-gray-400 px-1 mb-2">일정 유형</p>
+              <div className="flex flex-col gap-0.5">
+                {Object.entries(TYPE_STYLES).map(([key, s]) => (
+                  <div key={key} className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600">
+                    {React.createElement(s.icon, { size: 13, style: { color: s.dot, flexShrink: 0 } })}
+                    {s.label}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+        <div ref={calendarSectionRef} className="grid grid-cols-1 md:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6 flex-1 min-w-0">
           {/* Calendar */}
           <div className="md:col-span-3 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -834,60 +1083,31 @@ export default function CalendarTodoApp() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 mb-3 flex-wrap">
-              <div className="flex items-center gap-1.5 overflow-x-auto flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 overflow-x-auto mb-3 lg:hidden">
+              <button
+                onClick={() => setAssigneeFilter("all")}
+                className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
+                style={{ backgroundColor: assigneeFilter === "all" ? ACCENT : "#F3F4F6", color: assigneeFilter === "all" ? "#fff" : "#6B7280" }}
+              >
+                전체
+              </button>
+              <button
+                onClick={() => setAssigneeFilter("me")}
+                className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
+                style={{ backgroundColor: assigneeFilter === "me" ? ACCENT : "#F3F4F6", color: assigneeFilter === "me" ? "#fff" : "#6B7280" }}
+              >
+                나
+              </button>
+              {assigneeOptions.map(name => (
                 <button
-                  onClick={() => setAssigneeFilter("all")}
+                  key={name}
+                  onClick={() => setAssigneeFilter(name)}
                   className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: assigneeFilter === "all" ? ACCENT : "#F3F4F6", color: assigneeFilter === "all" ? "#fff" : "#6B7280" }}
+                  style={{ backgroundColor: assigneeFilter === name ? ACCENT : "#F3F4F6", color: assigneeFilter === name ? "#fff" : "#6B7280" }}
                 >
-                  전체
+                  {name}
                 </button>
-                <button
-                  onClick={() => setAssigneeFilter("me")}
-                  className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: assigneeFilter === "me" ? ACCENT : "#F3F4F6", color: assigneeFilter === "me" ? "#fff" : "#6B7280" }}
-                >
-                  나
-                </button>
-                {assigneeOptions.map(name => (
-                  <button
-                    key={name}
-                    onClick={() => setAssigneeFilter(name)}
-                    className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: assigneeFilter === name ? ACCENT : "#F3F4F6", color: assigneeFilter === name ? "#fff" : "#6B7280" }}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
-              <div className="relative w-full sm:w-48 flex-shrink-0">
-                <input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="일정 검색"
-                  className="w-full text-xs pl-3 pr-3 py-1.5 rounded-full outline-none border border-gray-200 focus:border-gray-300"
-                  style={{ backgroundColor: SIDEBAR_BG }}
-                />
-                {searchResults.length > 0 && (
-                  <div
-                    className="absolute right-0 mt-1 rounded-lg overflow-y-auto"
-                    style={{ top: "100%", width: "280px", maxHeight: "280px", backgroundColor: SURFACE, border: "1px solid #D6DAE3", boxShadow: "0 8px 20px rgba(17,24,39,0.12)", zIndex: 50 }}
-                  >
-                    {searchResults.map(ev => (
-                      <button
-                        key={`${ev.ownerUid}_${ev.id}`}
-                        onClick={() => { openEventForEdit(ev); setSearchQuery(""); }}
-                        className="flex items-center gap-2 w-full text-left px-3 py-2 hover:bg-gray-50"
-                      >
-                        {renderBadge(ev, 14)}
-                        <span className="text-xs text-gray-400 flex-shrink-0">{shortDateLabel(ev.date)}</span>
-                        <span className="text-xs truncate" style={{ color: "#111827" }}>{ev.title}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              ))}
             </div>
 
             {calendarView === "month" ? (
@@ -945,15 +1165,11 @@ export default function CalendarTodoApp() {
                         <button
                           key={`${ev.ownerUid}_${ev.id}`}
                           onClick={(e) => { e.stopPropagation(); openEventForEdit(ev); }}
-                          className="text-xs px-1.5 py-0.5 rounded truncate flex items-center gap-1 w-full min-w-0 text-left"
-                          style={{
-                            backgroundColor: styleFor(ev.type).soft,
-                            color: styleFor(ev.type).text,
-                          }}
+                          className="text-xs px-1 py-0.5 rounded truncate flex items-center gap-1 w-full min-w-0 text-left hover:bg-gray-50"
                         >
-                          {renderBadge(ev)}
-                          <span className="opacity-70">{ev.time}</span>
-                          <span className="truncate">{ev.title}</span>
+                          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: personColor(ev.ownerName) }} />
+                          <span className="text-gray-400 flex-shrink-0">{ev.time}</span>
+                          <span className="truncate" style={{ color: "#374151" }}>{ev.title}</span>
                         </button>
                       ))}
                       {shownTodos.map(td => (
@@ -993,11 +1209,11 @@ export default function CalendarTodoApp() {
                     marginTop: "22px",
                     height: "18px",
                     zIndex: 5,
-                    backgroundColor: styleFor(seg.ev.type).soft,
-                    color: styleFor(seg.ev.type).text,
+                    backgroundColor: hexToRgba(personColor(seg.ev.ownerName), 0.14),
+                    color: "#374151",
                   }}
                 >
-                  {renderBadge(seg.ev)}
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: personColor(seg.ev.ownerName) }} />
                   <span className="opacity-70">{seg.ev.time}</span>
                   <span className="truncate">{seg.ev.title}</span>
                 </button>
@@ -1073,7 +1289,7 @@ export default function CalendarTodoApp() {
               </div>
             )}
 
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-4 pt-4" style={{ borderTop: "1px solid #F1F2F6" }}>
+            <div className="lg:hidden flex flex-wrap items-center gap-x-4 gap-y-2 mt-4 pt-4" style={{ borderTop: "1px solid #F1F2F6" }}>
               <div className="flex items-center gap-1.5 text-xs text-gray-500">
                 <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: ACCENT }} /> 회의
               </div>
@@ -1133,7 +1349,7 @@ export default function CalendarTodoApp() {
               )}
             </div>
 
-            <div className="rounded-xl p-4 sm:p-5" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
+            <div ref={todoSectionRef} className="rounded-xl p-4 sm:p-5" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <ListTodo size={16} style={{ color: ACCENT }} />
@@ -1321,6 +1537,7 @@ export default function CalendarTodoApp() {
             </div>
           </div>
         </div>
+        </div>
       </div>
 
       {/* Hover preview card: 날짜 셀에 마우스를 올리면 해당 날짜의 전체 일정/할 일 목록 */}
@@ -1410,6 +1627,54 @@ export default function CalendarTodoApp() {
           <button onClick={handleUndo} className="font-semibold" style={{ color: ACCENT === "#4F73F5" ? "#93A9FF" : ACCENT }}>
             되돌리기
           </button>
+        </div>
+      )}
+
+      {/* 가져오기 미리보기 모달 */}
+      {importPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ backgroundColor: "rgba(17,24,39,0.35)" }}>
+          <div className="w-full max-w-sm rounded-xl p-5" style={{ backgroundColor: SURFACE }}>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm font-semibold" style={{ color: "#111827" }}>가져오기 미리보기</span>
+              <button type="button" onClick={cancelImport} className="text-gray-400 hover:text-gray-600">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="rounded-lg p-3 mb-3" style={{ backgroundColor: SIDEBAR_BG }}>
+              <p className="text-xs text-gray-600 mb-1">
+                일정 <span className="font-semibold" style={{ color: ACCENT }}>{importPreview.events.length}개</span> 정상 확인
+                {importPreview.eventsSkipped > 0 && (
+                  <span style={{ color: "#EF4444" }}> · {importPreview.eventsSkipped}개 형식 오류로 제외</span>
+                )}
+              </p>
+              <p className="text-xs text-gray-600">
+                할 일 <span className="font-semibold" style={{ color: ACCENT }}>{importPreview.todos.length}개</span> 정상 확인
+                {importPreview.todosSkipped > 0 && (
+                  <span style={{ color: "#EF4444" }}> · {importPreview.todosSkipped}개 형식 오류로 제외</span>
+                )}
+              </p>
+            </div>
+
+            <p className="text-xs text-gray-500 mb-4">
+              적용하면 현재 화면의 일정·할 일이 이 파일 내용으로 전부 교체됩니다.
+            </p>
+
+            <button
+              onClick={applyImport}
+              className="w-full py-2.5 rounded-lg text-sm font-medium text-white mb-2"
+              style={{ backgroundColor: ACCENT }}
+            >
+              적용하기
+            </button>
+            <button
+              onClick={cancelImport}
+              className="w-full py-2.5 rounded-lg text-sm font-medium"
+              style={{ color: "#6B7280", backgroundColor: SIDEBAR_BG }}
+            >
+              취소
+            </button>
+          </div>
         </div>
       )}
 
