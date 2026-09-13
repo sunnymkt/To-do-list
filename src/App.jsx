@@ -1017,7 +1017,7 @@ export default function CalendarTodoApp() {
                 >
                   나
                 </button>
-                {Object.keys(NAME_BADGES).map(name => (
+                {assigneeOptions.map(name => (
                   <button
                     key={name}
                     onClick={() => setAssigneeFilter(name)}
