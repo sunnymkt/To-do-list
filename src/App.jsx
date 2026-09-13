@@ -308,9 +308,30 @@ export default function CalendarTodoApp() {
     setTodos(prev => {
       const overdue = prev.some(td => !td.done && td.date < t);
       if (!overdue) return prev;
-      return prev.map(td => (!td.done && td.date < t) ? { ...td, date: t } : td);
+      return prev.map(td => (!td.done && td.date < t) ? { ...td, originalDueDate: td.originalDueDate || td.date, date: t } : td);
     });
   }, [loaded]);
+
+  // --- 삭제 되돌리기(Undo) ---
+  const [undoInfo, setUndoInfo] = useState(null); // { type: 'event'|'todo', item }
+  const undoTimerRef = useRef(null);
+  function showUndo(type, item) {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setUndoInfo({ type, item });
+    undoTimerRef.current = setTimeout(() => setUndoInfo(null), 5000);
+  }
+  function handleUndo() {
+    if (!undoInfo) return;
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    if (undoInfo.type === "event") {
+      setEvents(prev => [...prev, undoInfo.item].sort((a, b) =>
+        a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date)
+      ));
+    } else {
+      setTodos(prev => [...prev, undoInfo.item]);
+    }
+    setUndoInfo(null);
+  }
 
   const fileInputRef = useRef(null);
 
@@ -396,19 +417,23 @@ export default function CalendarTodoApp() {
     setFormOpen(false);
   }
   function deleteEvent(id) {
+    const removed = events.find(ev => ev.id === id);
     setEvents(prev => prev.filter(ev => ev.id !== id));
     setFormOpen(false);
+    if (removed) showUndo("event", removed);
   }
   function addTodo() {
     if (!newTodo.trim()) return;
-    setTodos(prev => [...prev, { id: "t" + Date.now(), text: newTodo.trim(), done: false, date: newTodoDate, createdAt: todayStr() }]);
+    setTodos(prev => [...prev, { id: "t" + Date.now(), text: newTodo.trim(), done: false, date: newTodoDate, createdAt: todayStr(), originalDueDate: newTodoDate }]);
     setNewTodo("");
   }
   function toggleTodo(id) {
     setTodos(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
   }
   function deleteTodo(id) {
+    const removed = todos.find(t => t.id === id);
     setTodos(prev => prev.filter(t => t.id !== id));
+    if (removed) showUndo("todo", removed);
   }
   function startEditTodo(t) {
     setEditingTodoId(t.id);
@@ -499,14 +524,58 @@ export default function CalendarTodoApp() {
     return [...own, ...others];
   }, [events, teamSharedEvents, currentUser]);
 
+  // --- 담당자 필터 ---
+  const [assigneeFilter, setAssigneeFilter] = useState("all"); // "all" | "me" | 담당자 이름
+  const assigneeOptions = useMemo(() => {
+    const names = new Set();
+    for (const ev of combinedEvents) {
+      if (ev.ownerName && ev.ownerUid !== currentUser?.uid) names.add(ev.ownerName);
+    }
+    return Array.from(names).sort();
+  }, [combinedEvents, currentUser]);
+
+  const visibleEvents = useMemo(() => {
+    if (assigneeFilter === "all") return combinedEvents;
+    if (assigneeFilter === "me") return combinedEvents.filter(ev => ev.ownerUid === currentUser?.uid);
+    return combinedEvents.filter(ev => ev.ownerName === assigneeFilter);
+  }, [combinedEvents, assigneeFilter, currentUser]);
+
+  // --- 검색 ---
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return combinedEvents
+      .filter(ev => ev.title.toLowerCase().includes(q) || (ev.ownerName || "").toLowerCase().includes(q))
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(0, 20);
+  }, [combinedEvents, searchQuery]);
+
+  // --- 월간/주간 보기 ---
+  const [calendarView, setCalendarView] = useState("month"); // "month" | "week"
+  const [weekStart, setWeekStart] = useState(() => {
+    const t = new Date();
+    t.setDate(t.getDate() - t.getDay());
+    return fmtDate(t.getFullYear(), t.getMonth(), t.getDate());
+  });
+  const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+  function changeWeek(delta) {
+    setWeekStart(prev => addDays(prev, delta * 7));
+  }
+  function goTodayWeek() {
+    const t = new Date();
+    t.setDate(t.getDate() - t.getDay());
+    setWeekStart(fmtDate(t.getFullYear(), t.getMonth(), t.getDate()));
+  }
+
   const todayEvents = useMemo(() => {
     const t = todayStr();
-    return combinedEvents.filter(ev => ev.date === t).sort((a, b) => a.time.localeCompare(b.time));
-  }, [combinedEvents]);
+    return visibleEvents.filter(ev => ev.date === t).sort((a, b) => a.time.localeCompare(b.time));
+  }, [visibleEvents]);
 
   const upcomingGrouped = useMemo(() => {
     const t = todayStr();
-    const future = combinedEvents.filter(ev => ev.date > t).sort((a, b) =>
+    const future = visibleEvents.filter(ev => ev.date > t).sort((a, b) =>
       a.date === b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date)
     );
     const groups = [];
@@ -521,9 +590,9 @@ export default function CalendarTodoApp() {
       groups[groups.length - 1].events.push(ev);
     }
     return groups;
-  }, [combinedEvents]);
+  }, [visibleEvents]);
 
-  const multiDayEvents = useMemo(() => combinedEvents.filter(ev => ev.endDate && ev.endDate !== ev.date), [combinedEvents]);
+  const multiDayEvents = useMemo(() => visibleEvents.filter(ev => ev.endDate && ev.endDate !== ev.date), [visibleEvents]);
 
   // 연속 일정을 주 단위로 잘라서, 캘린더 그리드 위에 이어지는 막대로 그릴 위치를 계산합니다.
   const barSegments = useMemo(() => {
@@ -551,14 +620,14 @@ export default function CalendarTodoApp() {
 
   const eventsByDate = useMemo(() => {
     const map = {};
-    for (const ev of combinedEvents) {
+    for (const ev of visibleEvents) {
       if (ev.endDate && ev.endDate !== ev.date) continue; // 연속 일정은 별도 막대로 표시
       if (!map[ev.date]) map[ev.date] = [];
       map[ev.date].push(ev);
     }
     for (const k in map) map[k].sort((a, b) => a.time.localeCompare(b.time));
     return map;
-  }, [combinedEvents]);
+  }, [visibleEvents]);
 
   // 특정 날짜에 표시할 전체 일정(단일일 + 그 날짜를 포함하는 연속 일정)
   function eventsOnDate(dateStr) {
@@ -600,6 +669,14 @@ export default function CalendarTodoApp() {
     const [y, m, d] = dateStr.split("-").map(Number);
     const wd = WEEKDAYS[new Date(y, m - 1, d).getDay()];
     return { md: `${m}/${d}`, wd };
+  }
+
+  function daysLate(dateStr) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const due = new Date(y, m - 1, d);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.round((today - due) / 86400000);
   }
 
   // 미리보기 카드 위치 계산: 셀 아래쪽에 붙이되, 화면 오른쪽/아래쪽을 넘치면 반대쪽으로
@@ -723,24 +800,100 @@ export default function CalendarTodoApp() {
         <div className="grid grid-cols-1 md:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6">
           {/* Calendar */}
           <div className="md:col-span-3 rounded-xl p-3 sm:p-5 min-w-0 overflow-hidden" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-full" style={{ backgroundColor: ACCENT_SOFT }}>
                 <CalendarDays size={16} style={{ color: ACCENT }} />
-                <span className="text-sm font-semibold" style={{ color: ACCENT }}>{monthLabel}</span>
+                <span className="text-sm font-semibold" style={{ color: ACCENT }}>
+                  {calendarView === "month" ? monthLabel : `${dateWithWeekday(weekDates[0]).md} ~ ${dateWithWeekday(weekDates[6]).md}`}
+                </span>
               </div>
               <div className="flex items-center gap-1">
-                <button onClick={() => changeMonth(-1)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
+                <div className="flex items-center rounded-lg overflow-hidden border border-gray-200 mr-1">
+                  <button
+                    onClick={() => setCalendarView("month")}
+                    className="px-2.5 py-1 text-xs font-medium"
+                    style={{ backgroundColor: calendarView === "month" ? ACCENT_SOFT : "transparent", color: calendarView === "month" ? ACCENT : "#6B7280" }}
+                  >
+                    월
+                  </button>
+                  <button
+                    onClick={() => setCalendarView("week")}
+                    className="px-2.5 py-1 text-xs font-medium"
+                    style={{ backgroundColor: calendarView === "week" ? ACCENT_SOFT : "transparent", color: calendarView === "week" ? ACCENT : "#6B7280" }}
+                  >
+                    주
+                  </button>
+                </div>
+                <button onClick={() => calendarView === "month" ? changeMonth(-1) : changeWeek(-1)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
                   <ChevronLeft size={16} />
                 </button>
-                <button onClick={goToday} className="px-2.5 py-1 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-100">
+                <button onClick={() => calendarView === "month" ? goToday() : goTodayWeek()} className="px-2.5 py-1 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-100">
                   오늘
                 </button>
-                <button onClick={() => changeMonth(1)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
+                <button onClick={() => calendarView === "month" ? changeMonth(1) : changeWeek(1)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
                   <ChevronRight size={16} />
                 </button>
               </div>
             </div>
 
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <div className="flex items-center gap-1.5 overflow-x-auto flex-1 min-w-0">
+                <button
+                  onClick={() => setAssigneeFilter("all")}
+                  className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: assigneeFilter === "all" ? ACCENT : "#F3F4F6", color: assigneeFilter === "all" ? "#fff" : "#6B7280" }}
+                >
+                  전체
+                </button>
+                <button
+                  onClick={() => setAssigneeFilter("me")}
+                  className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: assigneeFilter === "me" ? ACCENT : "#F3F4F6", color: assigneeFilter === "me" ? "#fff" : "#6B7280" }}
+                >
+                  나
+                </button>
+                {assigneeOptions.map(name => (
+                  <button
+                    key={name}
+                    onClick={() => setAssigneeFilter(name)}
+                    className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: assigneeFilter === name ? ACCENT : "#F3F4F6", color: assigneeFilter === name ? "#fff" : "#6B7280" }}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+              <div className="relative w-full sm:w-48 flex-shrink-0">
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="일정 검색"
+                  className="w-full text-xs pl-3 pr-3 py-1.5 rounded-full outline-none border border-gray-200 focus:border-gray-300"
+                  style={{ backgroundColor: SIDEBAR_BG }}
+                />
+                {searchResults.length > 0 && (
+                  <div
+                    className="absolute right-0 mt-1 rounded-lg overflow-y-auto"
+                    style={{ top: "100%", width: "280px", maxHeight: "280px", backgroundColor: SURFACE, border: "1px solid #D6DAE3", boxShadow: "0 8px 20px rgba(17,24,39,0.12)", zIndex: 50 }}
+                  >
+                    {searchResults.map(ev => (
+                      <button
+                        key={ev.id}
+                        onClick={() => { openEventForEdit(ev); setSearchQuery(""); }}
+                        className="flex items-center gap-2 w-full text-left px-3 py-2 hover:bg-gray-50"
+                      >
+                        {renderBadge(ev, 14)}
+                        <span className="text-xs text-gray-400 flex-shrink-0">{shortDateLabel(ev.date)}</span>
+                        <span className="text-xs truncate" style={{ color: "#111827" }}>{ev.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {calendarView === "month" ? (
+              <>
             <div className="grid grid-cols-7 gap-1 mb-1" style={{ gridTemplateColumns: isMobile ? "1fr 2fr 2fr 2fr 2fr 2fr 1fr" : undefined }}>
               {WEEKDAYS.map((w, i) => (
                 <div key={w} className="text-center text-xs font-medium py-1 min-w-0"
@@ -866,6 +1019,61 @@ export default function CalendarTodoApp() {
                 />
               ))}
             </div>
+              </>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {weekDates.map(dateStr => {
+                  const dEvents = eventsOnDate(dateStr);
+                  const dTodos = todosByDate[dateStr] || [];
+                  const { md, wd } = dateWithWeekday(dateStr);
+                  const isToday = dateStr === todayStr();
+                  return (
+                    <div key={dateStr} className="rounded-lg p-2.5" style={{ backgroundColor: isToday ? SURFACE_ALT : "transparent", border: "1px solid #EEF0F4" }}>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="text-sm font-bold" style={{ color: isToday ? ACCENT : "#111827" }}>{md}</span>
+                        <span className="text-xs text-gray-400">({wd})</span>
+                        <button onClick={() => openFormForDate(dateStr)} className="ml-auto text-gray-300 hover:text-gray-600">
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                      {dEvents.length === 0 && dTodos.length === 0 ? (
+                        <p className="text-xs text-gray-300 py-1">일정 없음</p>
+                      ) : (
+                        <div className="flex flex-col gap-1">
+                          {dEvents.map(ev => (
+                            <button
+                              key={ev.id}
+                              onClick={() => openEventForEdit(ev)}
+                              className="flex items-center gap-2 text-left px-2 py-1 rounded-md hover:bg-gray-50"
+                            >
+                              {renderBadge(ev, 14)}
+                              {React.createElement(styleFor(ev.type).icon, { size: 12, style: { color: styleFor(ev.type).dot, flexShrink: 0 } })}
+                              <span className="text-xs text-gray-400 flex-shrink-0">{ev.time}</span>
+                              <span className="text-xs truncate" style={{ color: "#111827" }}>{ev.title}</span>
+                            </button>
+                          ))}
+                          {dTodos.map(td => (
+                            <button
+                              key={td.id}
+                              onClick={() => toggleTodo(td.id)}
+                              className="flex items-center gap-2 text-left px-2 py-1 rounded-md hover:bg-gray-50"
+                            >
+                              <span
+                                className="w-3 h-3 rounded-sm border flex items-center justify-center flex-shrink-0"
+                                style={{ borderColor: "#9CA3AF", backgroundColor: td.done ? "#9CA3AF" : "transparent" }}
+                              >
+                                {td.done && <Check size={8} color="#FFFFFF" strokeWidth={3} />}
+                              </span>
+                              <span className={`text-xs truncate ${td.done ? "line-through text-gray-400" : "text-gray-700"}`}>{td.text}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-4 pt-4" style={{ borderTop: "1px solid #F1F2F6" }}>
               <div className="flex items-center gap-1.5 text-xs text-gray-500">
@@ -1021,6 +1229,14 @@ export default function CalendarTodoApp() {
                         </>
                       ) : (
                         <>
+                          {!t.done && t.originalDueDate && daysLate(t.originalDueDate) > 0 && (
+                            <span
+                              className="text-xs font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: "rgba(239,68,68,0.1)", color: "#EF4444" }}
+                            >
+                              {daysLate(t.originalDueDate)}일 지연
+                            </span>
+                          )}
                           <button
                             onClick={() => toggleTodo(t.id)}
                             className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border"
@@ -1183,6 +1399,19 @@ export default function CalendarTodoApp() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* 삭제 되돌리기 토스트 */}
+      {undoInfo && (
+        <div
+          className="fixed left-1/2 flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm"
+          style={{ bottom: "24px", transform: "translateX(-50%)", backgroundColor: "#111827", color: "#fff", zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.25)" }}
+        >
+          <span>{undoInfo.type === "event" ? "일정이 삭제되었습니다." : "할 일이 삭제되었습니다."}</span>
+          <button onClick={handleUndo} className="font-semibold" style={{ color: ACCENT === "#4F73F5" ? "#93A9FF" : ACCENT }}>
+            되돌리기
+          </button>
         </div>
       )}
 
