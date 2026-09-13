@@ -4,7 +4,6 @@ import { auth, db } from "./firebase";
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signOut,
   updateProfile,
 } from "firebase/auth";
@@ -95,12 +94,11 @@ function toAuthEmail(username) {
 
 function authErrorMessage(code) {
   switch (code) {
-    case "auth/email-already-in-use": return "이미 사용 중인 아이디예요.";
-    case "auth/weak-password": return "비밀번호는 6자 이상이어야 해요.";
     case "auth/invalid-email": return "아이디는 영문/숫자로 입력해주세요.";
     case "auth/user-not-found":
     case "auth/wrong-password":
-    case "auth/invalid-credential": return "아이디 또는 비밀번호가 올바르지 않아요.";
+    case "auth/invalid-credential": return "아이디 또는 비밀번호가 올바르지 않아요. 관리자에게 문의해주세요.";
+    case "auth/too-many-requests": return "너무 여러 번 시도했어요. 잠시 후 다시 시도해주세요.";
     default: return "오류가 발생했어요. 다시 시도해주세요.";
   }
 }
@@ -123,27 +121,13 @@ async function saveUserData(uid, data) {
   }
 }
 
-function AuthScreen({ mode, setMode, form, setForm, onSubmit, error, loading }) {
+function AuthScreen({ form, setForm, onSubmit, error, loading }) {
   return (
     <div className="w-full min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: BG, fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');`}</style>
       <form onSubmit={onSubmit} className="w-full max-w-sm rounded-xl p-6" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
         <h1 className="text-base font-semibold mb-1" style={{ color: "#111827" }}>마케팅부 일정관리</h1>
-        <p className="text-xs text-gray-500 mb-5">
-          {mode === "login" ? "로그인해서 내 일정을 확인하세요" : "새 계정을 만드세요"}
-        </p>
-
-        {mode === "signup" && (
-          <>
-            <label className="text-xs font-medium text-gray-500 block mb-1">이름</label>
-            <input
-              value={form.name}
-              onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
-              className="w-full text-sm px-3 py-2 rounded-lg outline-none border border-gray-200 mb-3"
-              style={{ backgroundColor: SIDEBAR_BG }}
-            />
-          </>
-        )}
+        <p className="text-xs text-gray-500 mb-5">로그인해서 내 일정을 확인하세요</p>
 
         <label className="text-xs font-medium text-gray-500 block mb-1">아이디</label>
         <input
@@ -172,15 +156,38 @@ function AuthScreen({ mode, setMode, form, setForm, onSubmit, error, loading }) 
           className="w-full py-2.5 rounded-lg text-sm font-medium text-white disabled:opacity-50"
           style={{ backgroundColor: ACCENT }}
         >
-          {loading ? "처리 중..." : mode === "login" ? "로그인" : "회원가입"}
+          {loading ? "처리 중..." : "로그인"}
         </button>
 
+        <p className="text-center text-xs text-gray-400 mt-4">
+          계정이 없으신가요? 관리자(서현님)에게 아이디/비밀번호 발급을 요청해주세요.
+        </p>
+      </form>
+    </div>
+  );
+}
+
+function NameSetupScreen({ name, setName, onSubmit, loading }) {
+  return (
+    <div className="w-full min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: BG, fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}>
+      <form onSubmit={onSubmit} className="w-full max-w-sm rounded-xl p-6" style={{ backgroundColor: SURFACE, border: "1px solid #D6DAE3" }}>
+        <h1 className="text-base font-semibold mb-1" style={{ color: "#111827" }}>이름을 알려주세요</h1>
+        <p className="text-xs text-gray-500 mb-5">처음 로그인하셨네요. 캘린더에 표시될 이름을 한 번만 입력해주세요.</p>
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="예: 서현"
+          className="w-full text-sm px-3 py-2 rounded-lg outline-none border border-gray-200 mb-4"
+          style={{ backgroundColor: SIDEBAR_BG }}
+        />
         <button
-          type="button"
-          onClick={() => setMode(mode === "login" ? "signup" : "login")}
-          className="w-full text-center text-xs text-gray-500 mt-4 hover:text-gray-700"
+          type="submit"
+          disabled={loading || !name.trim()}
+          className="w-full py-2.5 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+          style={{ backgroundColor: ACCENT }}
         >
-          {mode === "login" ? "계정이 없으신가요? 회원가입" : "이미 계정이 있으신가요? 로그인"}
+          {loading ? "저장 중..." : "시작하기"}
         </button>
       </form>
     </div>
@@ -221,10 +228,11 @@ export default function CalendarTodoApp() {
   // --- 로그인/인증 상태 ---
   const [authChecked, setAuthChecked] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const [authMode, setAuthMode] = useState("login");
-  const [authForm, setAuthForm] = useState({ name: "", username: "", password: "" });
+  const [authForm, setAuthForm] = useState({ username: "", password: "" });
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [nameLoading, setNameLoading] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -241,23 +249,25 @@ export default function CalendarTodoApp() {
       setAuthError("아이디와 비밀번호를 입력해주세요.");
       return;
     }
-    if (authMode === "signup" && !authForm.name.trim()) {
-      setAuthError("이름을 입력해주세요.");
-      return;
-    }
     setAuthLoading(true);
     try {
-      if (authMode === "signup") {
-        const cred = await createUserWithEmailAndPassword(auth, toAuthEmail(authForm.username), authForm.password);
-        await updateProfile(cred.user, { displayName: authForm.name.trim() });
-        setCurrentUser({ ...cred.user, displayName: authForm.name.trim() });
-      } else {
-        await signInWithEmailAndPassword(auth, toAuthEmail(authForm.username), authForm.password);
-      }
+      await signInWithEmailAndPassword(auth, toAuthEmail(authForm.username), authForm.password);
     } catch (err) {
       setAuthError(authErrorMessage(err.code));
     } finally {
       setAuthLoading(false);
+    }
+  }
+
+  async function handleNameSubmit(e) {
+    e.preventDefault();
+    if (!nameInput.trim()) return;
+    setNameLoading(true);
+    try {
+      await updateProfile(auth.currentUser, { displayName: nameInput.trim() });
+      setCurrentUser({ ...auth.currentUser, displayName: nameInput.trim() });
+    } finally {
+      setNameLoading(false);
     }
   }
 
@@ -627,13 +637,22 @@ export default function CalendarTodoApp() {
   if (!currentUser) {
     return (
       <AuthScreen
-        mode={authMode}
-        setMode={setAuthMode}
         form={authForm}
         setForm={setAuthForm}
         onSubmit={handleAuthSubmit}
         error={authError}
         loading={authLoading}
+      />
+    );
+  }
+
+  if (!currentUser.displayName) {
+    return (
+      <NameSetupScreen
+        name={nameInput}
+        setName={setNameInput}
+        onSubmit={handleNameSubmit}
+        loading={nameLoading}
       />
     );
   }
