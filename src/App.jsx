@@ -283,6 +283,7 @@ export default function CalendarTodoApp() {
   const [previewDate, setPreviewDate] = useState(null);
   const [previewRect, setPreviewRect] = useState(null);
   const closeTimer = useRef(null);
+  const previewHovered = useRef(false);
 
   // 모바일 폭 감지 (주말 칸 너비 조정, 칸 안에 보이는 항목 수 조정용)
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 640);
@@ -556,18 +557,28 @@ export default function CalendarTodoApp() {
     setEditingTodoText(t.text);
     setEditingTodoDate(t.date);
   }
+  // 미리보기 카드에서 수정하던 중 마우스가 카드 밖에 있다면, 수정이 끝날 때 카드를 닫습니다.
+  function closePreviewIfIdle() {
+    if (!previewHovered.current) {
+      setPreviewDate(null);
+      setPreviewRect(null);
+    }
+  }
   function cancelEditTodo() {
     setEditingTodoId(null);
+    closePreviewIfIdle();
   }
   function saveEditTodo() {
-    if (!editingTodoText.trim()) { setEditingTodoId(null); return; }
+    if (!editingTodoText.trim()) { cancelEditTodo(); return; }
     setTodos(prev => prev.map(t => t.id === editingTodoId ? { ...t, text: editingTodoText.trim(), date: editingTodoDate || t.date } : t));
     setEditingTodoId(null);
+    closePreviewIfIdle();
   }
 
   // 셀에 마우스를 올리면 살짝 지연 후 미리보기를 열고, 벗어나면 닫습니다.
   function handleCellEnter(e, dateStr, hasContent) {
     if (!hasContent) return;
+    if (editingTodoId) return; // 할 일 수정 중에는 미리보기를 바꾸지 않음
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
     const rect = e.currentTarget.getBoundingClientRect();
     setPreviewRect(rect);
@@ -581,15 +592,19 @@ export default function CalendarTodoApp() {
   }
   // 날짜를 클릭하면 미리보기를 엽니다 (내용이 없어도 "일정 추가" 버튼을 쓸 수 있게 항상 엽니다).
   function handleCellClick(e, dateStr) {
+    if (editingTodoId) setEditingTodoId(null);
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
     const rect = e.currentTarget.getBoundingClientRect();
     setPreviewRect(rect);
     setPreviewDate(dateStr);
   }
   function handlePreviewEnter() {
+    previewHovered.current = true;
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
   }
   function handlePreviewLeave() {
+    previewHovered.current = false;
+    if (editingTodoId) return; // 수정 중에는 카드를 유지
     setPreviewDate(null);
     setPreviewRect(null);
   }
@@ -1464,10 +1479,10 @@ export default function CalendarTodoApp() {
                               <span className="text-gray-300 ml-1.5">{shortDateLabel(t.createdAt)}</span>
                             )}
                           </span>
-                          <button onClick={() => startEditTodo(t)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-gray-600 transition-opacity flex-shrink-0">
+                          <button onClick={() => startEditTodo(t)} className="text-gray-300 hover:text-gray-600 flex-shrink-0" title="수정">
                             <Pencil size={12} />
                           </button>
-                          <button onClick={() => deleteTodo(t.id)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity flex-shrink-0">
+                          <button onClick={() => deleteTodo(t.id)} className="text-gray-300 hover:text-red-500 flex-shrink-0" title="삭제">
                             <Trash2 size={12} />
                           </button>
                         </>
@@ -1597,19 +1612,56 @@ export default function CalendarTodoApp() {
                   <div style={{ borderTop: "1px solid #F1F2F6", margin: "2px 0" }} />
                 )}
                 {previewTodos.map(td => (
-                  <button
-                    key={td.id}
-                    onClick={(e) => { e.stopPropagation(); toggleTodo(td.id); }}
-                    className="flex items-start gap-2 w-full text-left hover:bg-gray-50 rounded-md p-0.5 -m-0.5"
-                  >
-                    <span
-                      className="w-3 h-3 rounded-sm border flex items-center justify-center flex-shrink-0"
-                      style={{ marginTop: 2, borderColor: "#9CA3AF", backgroundColor: td.done ? "#9CA3AF" : "transparent" }}
-                    >
-                      {td.done && <Check size={8} color="#FFFFFF" strokeWidth={3} />}
-                    </span>
-                    <p className={`text-xs ${td.done ? "line-through text-gray-400" : "text-gray-700"}`}>{td.text}</p>
-                  </button>
+                  editingTodoId === td.id ? (
+                    <div key={td.id} className="flex flex-col gap-1.5 rounded-md p-1.5" style={{ backgroundColor: SIDEBAR_BG, border: `1px solid ${ACCENT}` }}>
+                      <input
+                        autoFocus
+                        value={editingTodoText}
+                        onChange={(e) => setEditingTodoText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveEditTodo();
+                          if (e.key === "Escape") cancelEditTodo();
+                        }}
+                        className="w-full text-xs px-2 py-1 rounded-md outline-none border bg-white"
+                        style={{ borderColor: "#E5E7EB" }}
+                      />
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="date"
+                          value={editingTodoDate}
+                          onChange={(e) => setEditingTodoDate(e.target.value)}
+                          className="flex-1 min-w-0 text-xs px-1.5 py-1 rounded-md outline-none border border-gray-200 bg-white"
+                        />
+                        <button onClick={saveEditTodo} className="flex-shrink-0 px-1" style={{ color: ACCENT }} title="저장">
+                          <Check size={14} />
+                        </button>
+                        <button onClick={cancelEditTodo} className="text-gray-300 hover:text-gray-500 flex-shrink-0 px-1" title="취소">
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div key={td.id} className="group flex items-start gap-2 w-full rounded-md p-0.5 -m-0.5 hover:bg-gray-50">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleTodo(td.id); }}
+                        className="flex items-start gap-2 flex-1 min-w-0 text-left"
+                      >
+                        <span
+                          className="w-3 h-3 rounded-sm border flex items-center justify-center flex-shrink-0"
+                          style={{ marginTop: 2, borderColor: "#9CA3AF", backgroundColor: td.done ? "#9CA3AF" : "transparent" }}
+                        >
+                          {td.done && <Check size={8} color="#FFFFFF" strokeWidth={3} />}
+                        </span>
+                        <p className={`text-xs ${td.done ? "line-through text-gray-400" : "text-gray-700"}`}>{td.text}</p>
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); startEditTodo(td); }} className="flex-shrink-0 text-gray-300 hover:text-gray-600" style={{ marginTop: 1 }} title="수정">
+                        <Pencil size={12} />
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); deleteTodo(td.id); }} className="flex-shrink-0 text-gray-300 hover:text-red-500" style={{ marginTop: 1 }} title="삭제">
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  )
                 ))}
               </div>
             )}
